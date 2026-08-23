@@ -1,0 +1,8 @@
+{
+  "name": "Remix SkillHub - 企业AI技能与插件市场",
+  "description": "面向企业内网与私有化部署的AI技能/插件集市，支持双引擎安全审核（正则规则与LLM大模型智能审核）、在线代码与ZIP文件树查看、CLI命令行一键安装与插件全生命周期管理。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
