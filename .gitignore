@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Runtime data (SQLite DB + git marketplace repo, regenerated on server startup)
+server/storage/

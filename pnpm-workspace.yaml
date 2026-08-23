@@ -1,0 +1,10 @@
+packages:
+  - '.'
+  - 'server'
+
+allowBuilds:
+  '@google/genai': true
+  '@nestjs/core': true
+  'esbuild': true
+  'protobufjs': true
+  sqlite3: true

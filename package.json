@@ -8,7 +8,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "server:dev": "pnpm --filter skillhub-server run start:dev",
+    "server:build": "pnpm --filter skillhub-server run build",
+    "server:start": "pnpm --filter skillhub-server run start:prod"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
