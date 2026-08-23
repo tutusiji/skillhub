@@ -27,13 +27,14 @@ import { SkillItem, UserAccount } from '../types';
 import { SkillCard } from './SkillCard';
 
 interface PersonalCenterViewProps {
-  currentUser: UserAccount;
+  currentUser: UserAccount | null;
   allSkills: SkillItem[];
   onSelectSkill: (skill: SkillItem) => void;
   onToggleStar: (id: string) => void;
   onToggleLike: (id: string) => void;
   onDownloadZip: (skill: SkillItem) => void;
   onOpenUploadModal: () => void;
+  onOpenLogin: () => void;
   onCopyInstallCmd: (cmd: string) => void;
   onToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, message: string) => void;
 }
@@ -48,11 +49,56 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
   onToggleLike,
   onDownloadZip,
   onOpenUploadModal,
+  onOpenLogin,
   onCopyInstallCmd,
   onToast
 }) => {
   const [activeTab, setActiveTab] = useState<PersonalTab>('starred');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Unauthenticated Guard
+  if (!currentUser) {
+    return (
+      <div className="p-8 sm:p-16 rounded-3xl bg-white border border-slate-200 shadow-sm text-center max-w-2xl mx-auto space-y-6 animate-in fade-in duration-200">
+        <div className="w-16 h-16 rounded-3xl bg-indigo-50 text-indigo-600 border border-indigo-200/80 flex items-center justify-center mx-auto shadow-sm">
+          <User className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-xl sm:text-2xl font-black text-slate-900">
+            登录后查看个人中心
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
+            您当前处于游客浏览状态。登录企业账号后，即可集中查看您已收藏的技能、已点赞插件，以及管理您提交发布的 MCP 扩展和审核进度。
+          </p>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 text-xs text-slate-600 max-w-md mx-auto text-left space-y-2">
+          <div className="font-bold text-slate-800 flex items-center gap-1.5">
+            <Sparkles className="w-4 h-4 text-indigo-600" />
+            <span>登录后尊享以下功能：</span>
+          </div>
+          <ul className="space-y-1.5 list-disc list-inside text-slate-600 pl-1 text-[11px]">
+            <li>一键收藏心仪技能并在个人中心快速检索</li>
+            <li>为优质团队插件点赞互动</li>
+            <li>发布个人/团队的 MCP Server 与 Agent 技能</li>
+            <li>提交全站产品建议与使用反馈</li>
+            <li>对已有技能发起双引擎安全实时体检</li>
+          </ul>
+        </div>
+
+        <div className="pt-2">
+          <button
+            onClick={onOpenLogin}
+            id="btn-personal-login-cta"
+            className="px-8 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold transition-all shadow-md shadow-indigo-500/25 active:scale-95 inline-flex items-center gap-2"
+          >
+            <User className="w-4 h-4" />
+            <span>立即登录企业账号</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Derived data
   const starredSkills = allSkills.filter(s => s.isStarred);

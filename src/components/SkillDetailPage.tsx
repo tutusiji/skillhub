@@ -22,7 +22,8 @@ import {
   Share2,
   RefreshCw,
   Cpu,
-  UserCheck
+  UserCheck,
+  ArrowDownCircle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { SkillItem } from '../types';
@@ -32,8 +33,8 @@ import { AuditReportInspector } from './AuditReportInspector';
 interface SkillDetailPageProps {
   skill: SkillItem;
   onBack: () => void;
-  onToggleStar: (id: string) => void;
-  onToggleLike: (id: string) => void;
+  onToggleStar: (id: string) => boolean | void;
+  onToggleLike: (id: string) => boolean | void;
   onDownloadZip: (skill: SkillItem) => void;
   onReScanSkill?: (skill: SkillItem) => void;
   isScanning?: boolean;
@@ -71,8 +72,8 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
   };
 
   const handleLike = () => {
-    onToggleLike(skill.id);
-    if (!skill.isLiked) {
+    const result = onToggleLike(skill.id);
+    if (result !== false && !skill.isLiked) {
       confetti({
         particleCount: 35,
         spread: 60,
@@ -89,6 +90,7 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
   const isApproved = skill.status === 'approved';
   const isPending = skill.status === 'pending';
   const isRejected = skill.status === 'rejected';
+  const isOffline = skill.status === 'offline';
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200 pb-12">
@@ -131,6 +133,12 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
                 <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 flex items-center gap-1.5 shadow-2xs">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                   <span>双引擎安全审计通过 ({skill.auditResults.score}分)</span>
+                </span>
+              )}
+              {isOffline && (
+                <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-3 py-1 rounded-full border border-slate-300 flex items-center gap-1.5 shadow-2xs">
+                  <ArrowDownCircle className="w-3.5 h-3.5 text-slate-500" />
+                  <span>已下架维护 (仅管理员/作者可见)</span>
                 </span>
               )}
               {isPending && (

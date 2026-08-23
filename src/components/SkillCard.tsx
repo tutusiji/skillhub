@@ -17,8 +17,8 @@ import { SkillItem } from '../types';
 interface SkillCardProps {
   skill: SkillItem;
   onSelectSkill: (skill: SkillItem) => void;
-  onToggleStar: (id: string) => void;
-  onToggleLike: (id: string) => void;
+  onToggleStar: (id: string) => boolean | void;
+  onToggleLike: (id: string) => boolean | void;
   onDownloadZip: (skill: SkillItem) => void;
   onCopyInstallCmd: (cmd: string, clientName?: string) => void;
 }
@@ -51,8 +51,8 @@ export const SkillCard: React.FC<SkillCardProps> = ({
 
   const handleLike = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onToggleLike(skill.id);
-    if (!skill.isLiked) {
+    const result = onToggleLike(skill.id);
+    if (result !== false && !skill.isLiked) {
       confetti({
         particleCount: 25,
         spread: 40,

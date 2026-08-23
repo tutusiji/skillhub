@@ -14,12 +14,18 @@ import {
   Check, 
   X, 
   Layers, 
-  FileText
+  FileText,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  Trash2,
+  PackageCheck,
+  PackageX
 } from 'lucide-react';
 import { AuditExecutionSummary, AuditRule, DeepSeekConfig, SkillItem, UserAccount } from '../types';
 import { executeDualEngineAudit } from '../utils/auditRunner';
 import { AuditReportInspector } from './AuditReportInspector';
 import { FileTreeViewer } from './FileTreeViewer';
+import { PopconfirmBubble } from './PopconfirmBubble';
 
 interface AuditManagementViewProps {
   currentUser: UserAccount;
@@ -28,6 +34,9 @@ interface AuditManagementViewProps {
   deepseekConfig?: DeepSeekConfig;
   onApproveSkill: (id: string, feedback?: string) => void;
   onRejectSkill: (id: string, feedback: string) => void;
+  onDelistSkill?: (id: string) => void;
+  onRelistSkill?: (id: string) => void;
+  onDeleteSkill?: (id: string) => void;
   onUpdateSkillAudit: (id: string, summary: AuditExecutionSummary) => void;
   onToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, message: string) => void;
 }
@@ -39,10 +48,13 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
   deepseekConfig,
   onApproveSkill,
   onRejectSkill,
+  onDelistSkill,
+  onRelistSkill,
+  onDeleteSkill,
   onUpdateSkillAudit,
   onToast
 }) => {
-  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'warning' | 'rejected' | 'approved'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'warning' | 'rejected' | 'approved' | 'offline'>('all');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [inspectingSkill, setInspectingSkill] = useState<SkillItem | null>(null);
   const [isScanningId, setIsScanningId] = useState<string | null>(null);
@@ -59,6 +71,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
     if (filterStatus === 'pending' && skill.status !== 'pending') return false;
     if (filterStatus === 'rejected' && skill.status !== 'rejected') return false;
     if (filterStatus === 'approved' && skill.status !== 'approved') return false;
+    if (filterStatus === 'offline' && skill.status !== 'offline') return false;
     if (filterStatus === 'warning' && skill.auditResults.overallStatus !== 'warning') return false;
 
     if (searchKeyword.trim()) {
@@ -76,6 +89,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
   const pendingCount = skills.filter(s => s.status === 'pending').length;
   const warningCount = skills.filter(s => s.auditResults.overallStatus === 'warning').length;
   const approvedCount = skills.filter(s => s.status === 'approved').length;
+  const offlineCount = skills.filter(s => s.status === 'offline').length;
   const rejectedCount = skills.filter(s => s.status === 'rejected').length;
 
   const handleRunScan = async (skill: SkillItem) => {
@@ -110,7 +124,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
     onApproveSkill(skillId, '符合内网安全与架构质量规范，予以放行上线。');
     onToast('success', '审核通过', '技能已成功批准并上线至 SkillHub 市场');
     if (inspectingSkill?.id === skillId) {
-      setInspectingSkill(null);
+      setInspectingSkill(prev => prev ? { ...prev, status: 'approved' } : null);
     }
   };
 
@@ -124,8 +138,38 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
     setShowRejectInput(false);
     setRejectFeedback('');
     if (inspectingSkill?.id === skillId) {
+      setInspectingSkill(prev => prev ? { ...prev, status: 'rejected' } : null);
+    }
+  };
+
+  const handleDelist = (skill: SkillItem) => {
+    if (onDelistSkill) {
+      onDelistSkill(skill.id);
+    }
+    if (inspectingSkill && inspectingSkill.id === skill.id) {
+      setInspectingSkill(prev => prev ? { ...prev, status: 'offline' } : null);
+    }
+    onToast('warning', '插件已下架', `《${skill.name}》已下架并在集市隐藏，转为下架维护状态`);
+  };
+
+  const handleRelist = (skill: SkillItem) => {
+    if (onRelistSkill) {
+      onRelistSkill(skill.id);
+    }
+    if (inspectingSkill && inspectingSkill.id === skill.id) {
+      setInspectingSkill(prev => prev ? { ...prev, status: 'approved' } : null);
+    }
+    onToast('success', '插件已上架', `《${skill.name}》已重新在企业集市公开并开放安装`);
+  };
+
+  const handleDelete = (skill: SkillItem) => {
+    if (onDeleteSkill) {
+      onDeleteSkill(skill.id);
+    }
+    if (inspectingSkill && inspectingSkill.id === skill.id) {
       setInspectingSkill(null);
     }
+    onToast('info', '插件已删除', `已彻底移除插件《${skill.name}》`);
   };
 
   return (
@@ -145,18 +189,27 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
               </h2>
             </div>
             <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-2xl leading-relaxed">
-              支持对用户提交的 AI 技能开展「正则特征引擎」与「LLM 语义安全引擎」双轨深度扫描，精准定位高危指令、凭据泄露与提示词越狱隐患。
+              支持对用户提交的 AI 技能开展「正则特征引擎」与「LLM 语义安全引擎」双轨深度扫描，支持对已过审插件进行一键上架、下架管控与安全生命周期管理。
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="px-4 py-2.5 rounded-2xl bg-amber-50 border border-amber-200 text-center min-w-[90px]">
-              <span className="text-[11px] text-amber-800 block font-semibold">待审队列</span>
-              <span className="text-xl font-black text-amber-900">{pendingCount}</span>
+          {/* Metric Status Badges */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="px-3.5 py-2 rounded-2xl bg-amber-50 border border-amber-200 text-center min-w-[76px]">
+              <span className="text-[10px] text-amber-800 block font-semibold">待审队列</span>
+              <span className="text-lg font-black text-amber-900">{pendingCount}</span>
             </div>
-            <div className="px-4 py-2.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-center min-w-[90px]">
-              <span className="text-[11px] text-emerald-800 block font-semibold">已上线</span>
-              <span className="text-xl font-black text-emerald-900">{approvedCount}</span>
+            <div className="px-3.5 py-2 rounded-2xl bg-emerald-50 border border-emerald-200 text-center min-w-[76px]">
+              <span className="text-[10px] text-emerald-800 block font-semibold">已上架</span>
+              <span className="text-lg font-black text-emerald-900">{approvedCount}</span>
+            </div>
+            <div className="px-3.5 py-2 rounded-2xl bg-slate-100 border border-slate-200 text-center min-w-[76px]">
+              <span className="text-[10px] text-slate-600 block font-semibold">已下架</span>
+              <span className="text-lg font-black text-slate-800">{offlineCount}</span>
+            </div>
+            <div className="px-3.5 py-2 rounded-2xl bg-rose-50 border border-rose-200 text-center min-w-[76px]">
+              <span className="text-[10px] text-rose-800 block font-semibold">已驳回</span>
+              <span className="text-lg font-black text-rose-900">{rejectedCount}</span>
             </div>
           </div>
         </div>
@@ -181,20 +234,28 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
               待审核 ({pendingCount})
             </button>
             <button
+              onClick={() => setFilterStatus('approved')}
+              className={`px-3 py-1.5 rounded-xl font-bold transition-colors ${
+                filterStatus === 'approved' ? 'bg-emerald-600 text-white shadow-2xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              已上架 ({approvedCount})
+            </button>
+            <button
+              onClick={() => setFilterStatus('offline')}
+              className={`px-3 py-1.5 rounded-xl font-bold transition-colors ${
+                filterStatus === 'offline' ? 'bg-slate-700 text-white shadow-2xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              已下架 ({offlineCount})
+            </button>
+            <button
               onClick={() => setFilterStatus('warning')}
               className={`px-3 py-1.5 rounded-xl font-bold transition-colors ${
                 filterStatus === 'warning' ? 'bg-orange-600 text-white shadow-2xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
             >
               存在告警 ({warningCount})
-            </button>
-            <button
-              onClick={() => setFilterStatus('approved')}
-              className={`px-3 py-1.5 rounded-xl font-bold transition-colors ${
-                filterStatus === 'approved' ? 'bg-emerald-600 text-white shadow-2xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              已通过 ({approvedCount})
             </button>
             <button
               onClick={() => setFilterStatus('rejected')}
@@ -230,6 +291,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
             const isScanning = isScanningId === skill.id;
             const isPending = skill.status === 'pending';
             const isApproved = skill.status === 'approved';
+            const isOffline = skill.status === 'offline';
             const isRejected = skill.status === 'rejected';
 
             return (
@@ -257,13 +319,19 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
                     )}
                     {isApproved && (
                       <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" />
-                        <span>已放行上线</span>
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        <span>已上架 (集市公开)</span>
+                      </span>
+                    )}
+                    {isOffline && (
+                      <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-300 flex items-center gap-1">
+                        <ArrowDownCircle className="w-3 h-3 text-slate-500" />
+                        <span>已下架 (集市隐藏)</span>
                       </span>
                     )}
                     {isRejected && (
                       <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-800 border border-rose-200 flex items-center gap-1">
-                        <XCircle className="w-3 h-3" />
+                        <XCircle className="w-3 h-3 text-rose-600" />
                         <span>已驳回</span>
                       </span>
                     )}
@@ -285,7 +353,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
                 </div>
 
                 {/* Score & Dual-engine badges */}
-                <div className="flex items-center gap-4 shrink-0">
+                <div className="flex items-center gap-3 shrink-0 flex-wrap sm:flex-nowrap">
                   <div className="text-center px-3.5 py-2 rounded-2xl bg-slate-50 border border-slate-200">
                     <span className="text-[10px] text-slate-500 block font-semibold">双引擎得分</span>
                     <span className={`text-base font-extrabold ${
@@ -296,8 +364,9 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
                     </span>
                   </div>
 
-                  {/* Actions */}
+                  {/* Actions Bar */}
                   <div className="flex items-center gap-2 flex-wrap">
+                    {/* Dual Engine Re-Scan */}
                     <button
                       onClick={() => handleRunScan(skill)}
                       disabled={isScanning}
@@ -312,17 +381,75 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
                       ) : (
                         <>
                           <Sparkles className="w-3.5 h-3.5" />
-                          <span>双引擎重扫</span>
+                          <span>重扫</span>
                         </>
                       )}
                     </button>
 
+                    {/* Published / Approved Status Controls: Delist & Relist */}
+                    {isApproved && (
+                      <PopconfirmBubble
+                        title="确定下架该插件吗？"
+                        description={`下架后《${skill.name}》将从企业集市中对普通开发者隐藏，无法被检索与下载。已安装使用的环境不受影响。`}
+                        confirmText="确认下架"
+                        cancelText="取消"
+                        type="warning"
+                        placement="bottom-right"
+                        onConfirm={() => handleDelist(skill)}
+                        trigger={({ onClick }) => (
+                          <button
+                            onClick={onClick}
+                            id={`btn-delist-${skill.id}`}
+                            className="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold flex items-center gap-1.5 transition-colors border border-amber-200"
+                            title="从集市下架该插件"
+                          >
+                            <ArrowDownCircle className="w-3.5 h-3.5 text-amber-600" />
+                            <span>下架</span>
+                          </button>
+                        )}
+                      />
+                    )}
+
+                    {isOffline && (
+                      <button
+                        onClick={() => handleRelist(skill)}
+                        id={`btn-relist-${skill.id}`}
+                        className="px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center gap-1.5 transition-colors border border-emerald-200"
+                        title="重新上架至企业集市"
+                      >
+                        <ArrowUpCircle className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>重新上架</span>
+                      </button>
+                    )}
+
+                    {/* Delete Skill Button with Popconfirm */}
+                    <PopconfirmBubble
+                      title="确定彻底删除该插件？"
+                      description={`确定要永久删除《${skill.name}》吗？此操作不可撤销，该技能的所有版本文件、源码树及安全体检记录将被永久清除。`}
+                      confirmText="彻底删除"
+                      cancelText="取消"
+                      type="danger"
+                      placement="bottom-right"
+                      onConfirm={() => handleDelete(skill)}
+                      trigger={({ onClick }) => (
+                        <button
+                          onClick={onClick}
+                          id={`btn-delete-${skill.id}`}
+                          className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-colors"
+                          title="彻底删除插件"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    />
+
+                    {/* Audit Workspace Modal Trigger */}
                     <button
                       onClick={() => {
                         setInspectingSkill(skill);
                         setShowRejectInput(false);
                       }}
-                      className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold flex items-center gap-1.5 hover:bg-slate-800 transition-colors shadow-2xs active:scale-95"
+                      className="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold flex items-center gap-1.5 hover:bg-slate-800 transition-colors shadow-2xs active:scale-95"
                     >
                       <Eye className="w-3.5 h-3.5" />
                       <span>审核工作台</span>
@@ -347,7 +474,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
                     {inspectingSkill.category}
                   </span>
                   <h3 className="text-lg font-bold text-slate-900">
-                    {inspectingSkill.name} - 终审工作台
+                    {inspectingSkill.name} - 终审与生命周期管理
                   </h3>
                 </div>
                 <div className="text-xs font-mono text-slate-500">
@@ -462,28 +589,110 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
 
             {/* Modal Bottom Actions */}
             <div className="p-4 border-t border-slate-200 bg-white flex items-center justify-between shrink-0">
-              <div className="text-xs text-slate-500 font-medium">
-                当前状态: <strong className="text-slate-800 font-bold uppercase">{inspectingSkill.status}</strong>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-slate-500 font-medium">当前生命周期状态:</span>
+                {inspectingSkill.status === 'approved' && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" />
+                    <span>已上架 (公开)</span>
+                  </span>
+                )}
+                {inspectingSkill.status === 'offline' && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold border border-slate-300 flex items-center gap-1">
+                    <ArrowDownCircle className="w-3 h-3" />
+                    <span>已下架 (维护隐藏)</span>
+                  </span>
+                )}
+                {inspectingSkill.status === 'pending' && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 font-bold border border-amber-200 flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    <span>待终审</span>
+                  </span>
+                )}
+                {inspectingSkill.status === 'rejected' && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-800 font-bold border border-rose-200 flex items-center gap-1">
+                    <XCircle className="w-3 h-3" />
+                    <span>已驳回</span>
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
-                {!showRejectInput && (
+                {/* Delete button inside modal */}
+                <PopconfirmBubble
+                  title="确定彻底删除该插件？"
+                  description={`永久移除《${inspectingSkill.name}》的所有文件和体检数据。此操作不可逆。`}
+                  confirmText="彻底删除"
+                  cancelText="取消"
+                  type="danger"
+                  placement="top-right"
+                  onConfirm={() => handleDelete(inspectingSkill)}
+                  trigger={({ onClick }) => (
+                    <button
+                      onClick={onClick}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-rose-600 hover:bg-rose-50 border border-rose-200 text-xs font-bold transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>删除插件</span>
+                    </button>
+                  )}
+                />
+
+                {/* If approved: Delist option */}
+                {inspectingSkill.status === 'approved' && (
+                  <PopconfirmBubble
+                    title="确定下架该插件？"
+                    description={`下架后《${inspectingSkill.name}》将从企业集市中隐藏，普通开发者将无法检索。`}
+                    confirmText="确认下架"
+                    cancelText="取消"
+                    type="warning"
+                    placement="top-right"
+                    onConfirm={() => handleDelist(inspectingSkill)}
+                    trigger={({ onClick }) => (
+                      <button
+                        onClick={onClick}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold transition-colors"
+                      >
+                        <ArrowDownCircle className="w-4 h-4 text-amber-600" />
+                        <span>下架插件</span>
+                      </button>
+                    )}
+                  />
+                )}
+
+                {/* If offline: Relist option */}
+                {inspectingSkill.status === 'offline' && (
                   <button
-                    onClick={() => setShowRejectInput(true)}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition-colors"
+                    onClick={() => handleRelist(inspectingSkill)}
+                    className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md active:scale-95"
                   >
-                    <X className="w-4 h-4" />
-                    <span>驳回修改</span>
+                    <ArrowUpCircle className="w-4 h-4" />
+                    <span>重新上架至集市</span>
                   </button>
                 )}
 
-                <button
-                  onClick={() => handleApprove(inspectingSkill.id)}
-                  className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md active:scale-95"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>批准上线</span>
-                </button>
+                {/* If pending or rejected: Reject & Approve buttons */}
+                {(inspectingSkill.status === 'pending' || inspectingSkill.status === 'rejected') && (
+                  <>
+                    {!showRejectInput && (
+                      <button
+                        onClick={() => setShowRejectInput(true)}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                        <span>驳回修改</span>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => handleApprove(inspectingSkill.id)}
+                      className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md active:scale-95"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>批准上线</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>

@@ -121,7 +121,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
               className="p-2 rounded-xl hover:bg-slate-100 text-left flex items-center gap-2 font-medium"
             >
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-              <span>双引擎规则管理库</span>
+              <span>风控中心</span>
             </button>
           </div>
         </div>

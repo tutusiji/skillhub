@@ -107,7 +107,7 @@ export interface SkillItem {
   isStarred?: boolean;
   createdAt: string;
   updatedAt: string;
-  status: 'approved' | 'pending' | 'rejected' | 'scanning';
+  status: 'approved' | 'pending' | 'rejected' | 'scanning' | 'offline';
   permissions: string[];
   readme: string;
   fileTree: FileTreeNode[];

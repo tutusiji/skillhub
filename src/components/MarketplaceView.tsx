@@ -20,8 +20,8 @@ interface MarketplaceViewProps {
   skills: SkillItem[];
   onSelectSkill: (skill: SkillItem) => void;
   onOpenUpload: () => void;
-  onToggleStar: (id: string) => void;
-  onToggleLike: (id: string) => void;
+  onToggleStar: (id: string) => boolean | void;
+  onToggleLike: (id: string) => boolean | void;
   onDownloadZip: (skill: SkillItem) => void;
   onCopyInstallCmd: (cmd: string, clientName?: string) => void;
 }
@@ -69,7 +69,8 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
 
   const filteredSkills = useMemo(() => {
     return skills.filter(skill => {
-      // By default show approved or pending in market
+      // Only show approved and online skills in the marketplace
+      if (skill.status === 'offline' || skill.status === 'rejected') return false;
       if (selectedCategory !== 'all' && skill.category !== selectedCategory) return false;
 
       if (selectedClients.length > 0) {
