@@ -1,14 +1,16 @@
-import { AuditRule, DeepSeekConfig, FeedbackItem, SkillItem, UserAccount } from '../types';
+import { AuditRule, DeepSeekConfig, FeedbackItem, SkillDemand, SkillItem, UserAccount } from '../types';
 
 export const INITIAL_USERS: UserAccount[] = [
   {
     id: 'user-1',
     name: '林越 (研发总监/安全架构)',
     email: 'linyue@intranet.corp',
-    role: 'admin',
+    role: 'super_admin',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
     department: '基础技术平台 / AI安全实验室',
-    joinedAt: '2025-01-15'
+    joinedAt: '2025-01-15',
+    points: 10000,
+    title: '超级管理员 / 安全总监'
   },
   {
     id: 'user-2',
@@ -17,7 +19,9 @@ export const INITIAL_USERS: UserAccount[] = [
     role: 'developer',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
     department: '智能终端研发部',
-    joinedAt: '2025-03-20'
+    joinedAt: '2025-03-20',
+    points: 10000,
+    title: '全栈架构专家'
   },
   {
     id: 'user-3',
@@ -26,7 +30,64 @@ export const INITIAL_USERS: UserAccount[] = [
     role: 'developer',
     avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
     department: '大数据分析中心',
-    joinedAt: '2025-02-10'
+    joinedAt: '2025-02-10',
+    points: 10000,
+    title: '数据与 BI 分析师'
+  },
+  {
+    id: 'user-4',
+    name: '赵子涵 (UI/UX 体验主管)',
+    email: 'zhao.zihan@intranet.corp',
+    role: 'developer',
+    avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
+    department: '用户体验设计部 / UED',
+    joinedAt: '2025-02-18',
+    points: 10000,
+    title: '体验设计专家'
+  },
+  {
+    id: 'user-5',
+    name: '严宏斌 (高级产品总监)',
+    email: 'yan.hongbin@intranet.corp',
+    role: 'developer',
+    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
+    department: '企业数字化产品部',
+    joinedAt: '2025-01-28',
+    points: 10000,
+    title: '产品总监'
+  },
+  {
+    id: 'user-6',
+    name: '孙明杰 (嵌入式与硬件总监)',
+    email: 'sun.mingjie@intranet.corp',
+    role: 'developer',
+    avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80',
+    department: '智能物联网与硬件实验室',
+    joinedAt: '2025-02-22',
+    points: 10000,
+    title: '硬件系统架构师'
+  },
+  {
+    id: 'user-7',
+    name: '杜晓雯 (测试与质量工程主管)',
+    email: 'du.xiaowen@intranet.corp',
+    role: 'developer',
+    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80',
+    department: '效能与质量工程部',
+    joinedAt: '2025-03-01',
+    points: 10000,
+    title: '质量保障专家'
+  },
+  {
+    id: 'user-8',
+    name: '魏一鸣 (AI 安全审核员)',
+    email: 'wei.yiming@intranet.corp',
+    role: 'admin',
+    avatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80',
+    department: '合规与内控中心',
+    joinedAt: '2025-02-05',
+    points: 10000,
+    title: '平台管理员'
   }
 ];
 
@@ -174,6 +235,7 @@ export const INITIAL_SKILLS: SkillItem[] = [
     version: 'v2.1.0',
     description: '专为内网 MySQL/PostgreSQL 设计的慢查询分析与执行计划自动调优助手，集成索引建议与防 SQL 注入语法沙箱。',
     category: 'database',
+    expertDomain: 'data_analyst',
     clients: ['claude', 'cursor', 'mcp', 'open-webui'],
     author: {
       name: '黄雅婷 (数据架构组)',
@@ -387,6 +449,7 @@ npx @skillhub/cli add mcp sql-diagnose-agent
     version: 'v1.6.5',
     description: '内网 GitLab 协同插件，支持根据错误日志自动定位失败阶段、生成修复 MR 并触发重试流水线。',
     category: 'devops',
+    expertDomain: 'devops',
     clients: ['claude', 'cursor', 'mcp'],
     author: {
       name: '陈思宇 (DevOps 架构师)',
@@ -517,6 +580,7 @@ claude install @mcp/gitlab-cicd-orchestrator
     version: 'v3.0.2',
     description: '多源语义检索 Agent，支持并发扫描企业 Confluence、Notion 与 Jira 知识库，自动生成结构化研究报告。',
     category: 'productivity',
+    expertDomain: 'general',
     clients: ['claude', 'cursor', 'open-webui', 'chatgpt'],
     author: {
       name: '黄雅婷 (数据科学专家)',
@@ -608,6 +672,7 @@ claude install @mcp/gitlab-cicd-orchestrator
     version: 'v1.2.0',
     description: '针对内网 Kubernetes 集群的 Pod 状态分析、CrashLoopBackOff 根因推导与自动资源限制 (Limits) 优化建议。',
     category: 'devops',
+    expertDomain: 'devops',
     clients: ['claude', 'cursor', 'mcp'],
     author: {
       name: '陈思宇 (DevOps 架构师)',
@@ -690,11 +755,12 @@ claude install @mcp/gitlab-cicd-orchestrator
     version: 'v2.0.0-rc1',
     description: '自动拉取 Figma 设计稿的 Color / Typography Tokens，并实时转换生成 Tailwind CSS v4 及 CSS 变量代码。',
     category: 'coding',
+    expertDomain: 'ui_ux',
     clients: ['claude', 'cursor', 'copilot'],
     author: {
-      name: '陈思宇 (Senior FullStack)',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-      department: '智能终端研发部',
+      name: '赵子涵 (UI/UX 体验主管)',
+      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
+      department: '用户体验设计部 / UED',
       verified: true
     },
     tags: ['Figma', 'Tailwind', 'Design Tokens', '前端生成', 'UI自动化'],
@@ -745,6 +811,7 @@ claude install @mcp/gitlab-cicd-orchestrator
     version: 'v1.0.8',
     description: '在与任何外部或开源大模型交互前，自动检测并掩码用户输入中的手机号、身份证、内网机密代码与公钥哈希。',
     category: 'security',
+    expertDomain: 'fullstack',
     clients: ['claude', 'cursor', 'open-webui', 'chatgpt', 'mcp'],
     author: {
       name: '林越 (安全架构专家)',
@@ -801,6 +868,7 @@ claude install @mcp/gitlab-cicd-orchestrator
     version: 'v0.9.1',
     description: '监控本地工作区文件变动，每 10 分钟自动生成 Commit 并强制推送至远程分支。',
     category: 'devops',
+    expertDomain: 'devops',
     clients: ['claude', 'cursor'],
     author: {
       name: '陈思宇 (Senior FullStack)',
@@ -1039,4 +1107,167 @@ export const INITIAL_DEEPSEEK_CONFIG: DeepSeekConfig = {
   lastTestedAt: '2025-03-08T10:30:00Z',
   testStatus: 'success'
 };
+
+export const INITIAL_SKILL_DEMANDS: SkillDemand[] = [
+  {
+    id: 'demand-1',
+    title: 'PRD 智能拆解与 Mermaid 业务时序图/状态机生成 Agent',
+    description: '在日常产品评审中，需要能够上传 Markdown / 飞书 PRD 需求文档，自动识别其中的业务角色、调用链路与分支条件，一键输出符合企业规范的 Mermaid 交互时序图与架构流程图。',
+    targetDomain: 'pm',
+    expectedOutput: '支持 Claude Code & Cursor 的 MCP 协议插件，包含 prd_parse、mermaid_render 两个工具，输出干净的 Mermaid 代码与异常分支提醒。',
+    bountyPoints: 2500,
+    deadlineText: '永久有效',
+    author: {
+      id: 'user-5',
+      name: '严宏斌 (高级产品总监)',
+      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
+      department: '企业数字化产品部'
+    },
+    status: 'approved',
+    submissionsCount: 3,
+    createdAt: '2025-03-02T09:30:00Z',
+    updatedAt: '2025-03-03T11:00:00Z',
+    reviewedBy: '林越 (超级管理员)',
+    reviewedAt: '2025-03-03T11:00:00Z',
+    candidates: [
+      {
+        id: 'cand-1',
+        skillId: 'skill-custom-1',
+        skillName: 'PRD-to-Mermaid-Architect-MCP',
+        submitterId: 'user-2',
+        submitterName: '陈思宇 (Senior FullStack)',
+        submitterAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+        submittedAt: '2025-03-04T15:20:00Z',
+        notes: '已完成双引擎安全初筛，完全支持动态解析长文 PRD 并生成 PlantUML 与 Mermaid。',
+        status: 'pending'
+      }
+    ]
+  },
+  {
+    id: 'demand-2',
+    title: '嵌入式串口 Hex 数据流抓包分析与 CRC 校验告警 MCP',
+    description: '硬件工程师在实验室调试智能网关及传感器模组时，需要一个能直接对接本地 USB/UART 串口，自动根据寄存器协议字典解析 Hex 原始帧、校验 CRC8/16 并高亮异常错误码的 AI 调试插件。',
+    targetDomain: 'hardware_iot',
+    expectedOutput: 'Node.js/Python 双实现的 MCP Server，提供 serial_read_stream、crc_verify、register_decode 工具，并具有安全端口访问限制。',
+    bountyPoints: 3000,
+    deadlineText: '永久有效',
+    author: {
+      id: 'user-6',
+      name: '孙明杰 (嵌入式与硬件总监)',
+      avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80',
+      department: '智能物联网与硬件实验室'
+    },
+    status: 'approved',
+    submissionsCount: 1,
+    createdAt: '2025-03-04T14:15:00Z',
+    updatedAt: '2025-03-05T09:00:00Z',
+    reviewedBy: '林越 (超级管理员)',
+    reviewedAt: '2025-03-05T09:00:00Z'
+  },
+  {
+    id: 'demand-3',
+    title: 'Figma Design Tokens 自动同步转 Tailwind v4 / CSS 变量',
+    description: 'UED 团队希望设计师在 Figma 修改色彩变量、圆角间距后，工程师可以在编辑器内呼叫技能，自动拉取 Figma Token 并转换为符合规范的 Tailwind CSS 配置与 TS 类型定义。',
+    targetDomain: 'ui_ux',
+    expectedOutput: '支持 Figma REST API 鉴权代理，输出标准的 tailwind.config 及全局 CSS 变量层，避免样式硬编码。',
+    bountyPoints: 2000,
+    deadlineText: '永久有效',
+    author: {
+      id: 'user-4',
+      name: '赵子涵 (UI/UX 体验主管)',
+      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
+      department: '用户体验设计部 / UED'
+    },
+    status: 'approved',
+    submissionsCount: 2,
+    createdAt: '2025-03-06T10:00:00Z',
+    updatedAt: '2025-03-06T15:30:00Z',
+    reviewedBy: '魏一鸣 (管理员)',
+    reviewedAt: '2025-03-06T15:30:00Z'
+  },
+  {
+    id: 'demand-4',
+    title: '基于 Swagger/OpenAPI 的边界值与异常场景自动化测试用例生成器',
+    description: '质量工程部需要输入接口契约 JSON/YAML 后，自动分析参数类型，针对空字符串、超长文本、SQL 盲注字符、最大整型溢出等边界情况生成 Vitest/Pytest 自动化脚本。',
+    targetDomain: 'qa_test',
+    expectedOutput: '输出符合公司测试框架的脚本套件，覆盖率不低于 85%，支持一键导出到 CI/CD 流水线。',
+    bountyPoints: 1800,
+    deadlineText: '永久有效',
+    author: {
+      id: 'user-7',
+      name: '杜晓雯 (测试与质量工程主管)',
+      avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80',
+      department: '效能与质量工程部'
+    },
+    status: 'approved',
+    submissionsCount: 4,
+    createdAt: '2025-03-07T11:20:00Z',
+    updatedAt: '2025-03-07T16:00:00Z',
+    reviewedBy: '林越 (超级管理员)',
+    reviewedAt: '2025-03-07T16:00:00Z'
+  },
+  {
+    id: 'demand-5',
+    title: '微服务分布式 TraceId 跨系统日志智能关联检索定位 Agent',
+    description: '开发团队在排查生产/预发偶发 500 故障时，希望能通过 TraceID 一键跨 Jaeger、Elasticsearch、SkyWalking 关联上下游调用链，定位耗时最高或抛出异常的根因代码行。',
+    targetDomain: 'fullstack',
+    expectedOutput: '集成内网 ES/Trace 鉴权网关的 MCP 技能，能够自动提取异常堆栈并匹配 Git 变更记录。',
+    bountyPoints: 4000,
+    deadlineText: '永久有效',
+    author: {
+      id: 'user-2',
+      name: '陈思宇 (Senior FullStack)',
+      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+      department: '智能终端研发部'
+    },
+    status: 'approved',
+    submissionsCount: 1,
+    createdAt: '2025-03-08T08:00:00Z',
+    updatedAt: '2025-03-08T10:00:00Z',
+    reviewedBy: '林越 (超级管理员)',
+    reviewedAt: '2025-03-08T10:00:00Z'
+  },
+  {
+    id: 'demand-6',
+    title: '大模型量化后精度损失与推理耗时自动化评测套件',
+    description: '算法团队经常对开源基础模型进行 AWQ/GGUF/GPTQ 量化，需要一个能够跑批自动化 Benchmark，对比 MMLU、GSM8K 与业务测试集精度退化情况的评测脚本技能。',
+    targetDomain: 'algorithm_ai',
+    expectedOutput: '提供自动化评测 CLI 与 Python 执行包，生成多维雷达图与 CSV 统计报表。',
+    bountyPoints: 3500,
+    deadlineText: '永久有效',
+    author: {
+      id: 'user-3',
+      name: '黄雅婷 (数据科学专家)',
+      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
+      department: '大数据分析中心'
+    },
+    status: 'pending',
+    submissionsCount: 0,
+    createdAt: '2025-03-08T14:30:00Z',
+    updatedAt: '2025-03-08T14:30:00Z'
+  },
+  {
+    id: 'demand-7',
+    title: '跨部门内部知识库与周报智能提取小助手',
+    description: '希望能有一键将多人在飞书/Confluence 记录的工作事项自动分类汇总为规范周报的轻量级 Prompt 技能。',
+    targetDomain: 'general',
+    expectedOutput: '无需复杂后台，仅需提供优化过的 System Prompt 与输入格式模板。',
+    bountyPoints: 500,
+    deadlineText: '永久有效',
+    author: {
+      id: 'user-2',
+      name: '陈思宇 (Senior FullStack)',
+      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+      department: '智能终端研发部'
+    },
+    status: 'rejected',
+    rejectReason: '内网办公套件已有类似官方模板插件，建议提升悬赏难度或聚焦更具体的研发效能痛点后重新提交。',
+    submissionsCount: 0,
+    createdAt: '2025-03-01T10:00:00Z',
+    updatedAt: '2025-03-01T15:00:00Z',
+    reviewedBy: '林越 (超级管理员)',
+    reviewedAt: '2025-03-01T15:00:00Z'
+  }
+];
+
 

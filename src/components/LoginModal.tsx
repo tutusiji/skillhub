@@ -58,11 +58,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       name: customName.trim(),
       email: customEmail.trim() || `${customName.trim().toLowerCase()}@intranet.corp`,
       role: customRole,
-      avatar: customRole === 'admin' 
+      avatar: customRole === 'admin' || customRole === 'super_admin'
         ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
         : 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
       department: customDept.trim() || '技术研发中心',
-      joinedAt: new Date().toISOString().split('T')[0]
+      joinedAt: new Date().toISOString().split('T')[0],
+      points: 10000
     };
 
     if (onCustomLogin) {

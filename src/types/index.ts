@@ -1,4 +1,4 @@
-export type UserRole = 'developer' | 'admin' | 'security_officer';
+export type UserRole = 'super_admin' | 'admin' | 'developer';
 
 export interface UserAccount {
   id: string;
@@ -8,6 +8,34 @@ export interface UserAccount {
   avatar: string;
   department: string;
   joinedAt: string;
+  points: number; // 奖励积分，初始 10,000
+  title?: string;
+}
+
+export type ExpertDomain = 
+  | 'all'
+  | 'ui_ux'          // UI/UX 设计师
+  | 'pm'             // 产品经理
+  | 'fullstack'      // 全栈开发
+  | 'algorithm_ai'   // 算法与 AI 工程师
+  | 'hardware_iot'   // 硬件工程师 / 物联网
+  | 'qa_test'        // 测试与质量工程师
+  | 'devops'         // 运维与 DevOps
+  | 'data_analyst'   // 数据分析与 BI
+  | 'general';       // 通用与协作
+
+export interface ExpertDomainInfo {
+  id: ExpertDomain;
+  name: string;
+  shortLabel: string;
+  description: string;
+  iconName: string;
+  badgeBg: string;
+  badgeText: string;
+  badgeBorder: string;
+  border?: string;
+  bg?: string;
+  text?: string;
 }
 
 export type SkillCategory = 
@@ -92,6 +120,7 @@ export interface SkillItem {
   version: string;
   description: string;
   category: SkillCategory;
+  expertDomain?: ExpertDomain; // 适用专家组/岗位
   clients: ClientPlatform[];
   author: {
     name: string;
@@ -119,6 +148,42 @@ export interface SkillItem {
     openWebUI?: string;
   };
   auditResults: AuditExecutionSummary;
+}
+
+export interface SkillDemandCandidate {
+  id: string;
+  skillId?: string;
+  skillName: string;
+  submitterId: string;
+  submitterName: string;
+  submitterAvatar: string;
+  submittedAt: string;
+  notes: string;
+  status: 'pending' | 'accepted' | 'rejected';
+}
+
+export interface SkillDemand {
+  id: string;
+  title: string;
+  description: string;
+  targetDomain: ExpertDomain;
+  expectedOutput: string;
+  bountyPoints: number; // 最低 100 积分
+  deadlineText: string; // 默认 '永久有效'
+  author: {
+    id: string;
+    name: string;
+    avatar: string;
+    department: string;
+  };
+  status: 'pending' | 'approved' | 'open' | 'rejected' | 'fulfilled' | 'closed';
+  rejectReason?: string;
+  submissionsCount: number;
+  candidates?: SkillDemandCandidate[];
+  createdAt: string;
+  updatedAt: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
 }
 
 export interface FeedbackItem {

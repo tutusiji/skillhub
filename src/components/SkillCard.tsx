@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { SkillItem } from '../types';
+import { getExpertDomainMeta } from '../data/expertDomains';
 
 interface SkillCardProps {
   skill: SkillItem;
@@ -48,6 +49,8 @@ export const SkillCard: React.FC<SkillCardProps> = ({
     label: skill.category, 
     color: 'bg-slate-100 text-slate-700 border-slate-200' 
   };
+
+  const domainMeta = getExpertDomainMeta(skill.expertDomain);
 
   const handleLike = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -92,6 +95,12 @@ export const SkillCard: React.FC<SkillCardProps> = ({
       <div>
         <div className="flex items-center justify-between gap-2 mb-3">
           <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Expert Domain Badge */}
+            {skill.expertDomain && (
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${domainMeta.badgeBg} ${domainMeta.badgeText} ${domainMeta.badgeBorder || domainMeta.border || 'border-slate-200'}`}>
+                {domainMeta.shortLabel}
+              </span>
+            )}
             <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-lg border ${categoryMeta.color}`}>
               {categoryMeta.label}
             </span>

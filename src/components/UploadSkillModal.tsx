@@ -11,10 +11,11 @@ import {
   ArrowLeft,
   FolderTree
 } from 'lucide-react';
-import { AuditRule, ClientPlatform, DeepSeekConfig, FileTreeNode, SkillCategory, SkillItem, UserAccount } from '../types';
+import { AuditRule, ClientPlatform, DeepSeekConfig, ExpertDomain, FileTreeNode, SkillCategory, SkillItem, UserAccount } from '../types';
 import { executeDualEngineAudit } from '../utils/auditRunner';
 import { FileTreeViewer } from './FileTreeViewer';
 import { AuditReportInspector } from './AuditReportInspector';
+import { EXPERT_DOMAINS } from '../data/expertDomains';
 
 interface UploadSkillModalProps {
   currentUser: UserAccount;
@@ -39,6 +40,7 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('@skillhub/');
   const [version, setVersion] = useState('v1.0.0');
+  const [expertDomain, setExpertDomain] = useState<ExpertDomain>('fullstack');
   const [category, setCategory] = useState<SkillCategory>('coding');
   const [description, setDescription] = useState('');
   const [clients, setClients] = useState<ClientPlatform[]>(['claude', 'cursor', 'mcp']);
@@ -176,6 +178,7 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
       slug: slug.trim(),
       version: version.trim() || 'v1.0.0',
       description: description.trim() || '企业内网专属 AI 技能',
+      expertDomain,
       category,
       clients: clients.length > 0 ? clients : ['claude'],
       author: {
@@ -325,24 +328,43 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-800 mb-1">
-                  所属业务类别
-                </label>
-                <select
-                  value={category}
-                  onChange={e => setCategory(e.target.value as SkillCategory)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
-                >
-                  <option value="coding">编程提效 (Coding)</option>
-                  <option value="database">数据库与 SQL 优化 (Database)</option>
-                  <option value="devops">DevOps 与 CI/CD 运维</option>
-                  <option value="mcp">MCP Server 扩展协议</option>
-                  <option value="security">安全与合规 (Security)</option>
-                  <option value="productivity">生产力与知识库 (DeepResearch)</option>
-                  <option value="data">大数据与商业智能 (Data)</option>
-                  <option value="agent">自主决策智能体 (Agent)</option>
-                </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-800 mb-1">
+                    所属岗位专家组 (岗位领域)
+                  </label>
+                  <select
+                    value={expertDomain}
+                    onChange={e => setExpertDomain(e.target.value as ExpertDomain)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
+                  >
+                    {EXPERT_DOMAINS.filter(d => d.id !== 'all').map(d => (
+                      <option key={d.id} value={d.id}>
+                        {d.shortLabel} ({d.name})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-800 mb-1">
+                    技术分类类别
+                  </label>
+                  <select
+                    value={category}
+                    onChange={e => setCategory(e.target.value as SkillCategory)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
+                  >
+                    <option value="coding">编程提效 (Coding)</option>
+                    <option value="database">数据库与 SQL 优化 (Database)</option>
+                    <option value="devops">DevOps 与 CI/CD 运维</option>
+                    <option value="mcp">MCP Server 扩展协议</option>
+                    <option value="security">安全与合规 (Security)</option>
+                    <option value="productivity">生产力与知识库 (DeepResearch)</option>
+                    <option value="data">大数据与商业智能 (Data)</option>
+                    <option value="agent">自主决策智能体 (Agent)</option>
+                  </select>
+                </div>
               </div>
 
               <div>

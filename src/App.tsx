@@ -4,25 +4,33 @@ import {
   INITIAL_DEEPSEEK_CONFIG,
   INITIAL_FEEDBACK, 
   INITIAL_SKILLS, 
-  INITIAL_USERS 
+  INITIAL_USERS,
+  INITIAL_SKILL_DEMANDS 
 } from './mock/initialData';
 import { 
   AuditExecutionSummary, 
   AuditRule, 
   DeepSeekConfig,
   FeedbackItem, 
+  SkillDemand,
+  SkillDemandCandidate,
   SkillItem, 
   ToastMessage, 
-  UserAccount 
+  UserAccount,
+  UserRole 
 } from './types';
-import { Header } from './components/Header';
+import { Header, NavigationTab } from './components/Header';
 import { MarketplaceView } from './components/MarketplaceView';
+import { SkillDemandMarketView } from './components/SkillDemandMarketView';
 import { SkillDetailPage } from './components/SkillDetailPage';
 import { PersonalCenterView } from './components/PersonalCenterView';
 import { UploadSkillModal } from './components/UploadSkillModal';
 import { AuditManagementView } from './components/AuditManagementView';
 import { RuleManagementView } from './components/RuleManagementView';
 import { RuleManagementModal } from './components/RuleManagementModal';
+import { AdminSettingsView } from './components/AdminSettingsView';
+import { CreateSkillDemandModal } from './components/CreateSkillDemandModal';
+import { SkillDemandDetailModal } from './components/SkillDemandDetailModal';
 import { FeedbackModal } from './components/FeedbackModal';
 import { CommandPaletteModal } from './components/CommandPaletteModal';
 import { LoginModal } from './components/LoginModal';
@@ -32,13 +40,31 @@ import { downloadSkillAsZip } from './utils/zipHelper';
 import { executeDualEngineAudit } from './utils/auditRunner';
 
 export default function App() {
-  // Main State with LocalStorage persistence
+  // Users state with LocalStorage persistence
+  const [allUsers, setAllUsers] = useState<UserAccount[]>(() => {
+    const saved = localStorage.getItem('skillhub_all_users');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return INITIAL_USERS;
+  });
+
+  // Main Skills State with LocalStorage persistence
   const [skills, setSkills] = useState<SkillItem[]>(() => {
     const saved = localStorage.getItem('skillhub_skills');
     if (saved) {
       try { return JSON.parse(saved); } catch (e) {}
     }
     return INITIAL_SKILLS;
+  });
+
+  // Skill Demands State with LocalStorage persistence
+  const [demands, setDemands] = useState<SkillDemand[]>(() => {
+    const saved = localStorage.getItem('skillhub_demands');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return INITIAL_SKILL_DEMANDS;
   });
 
   const [rules, setRules] = useState<AuditRule[]>(() => {
@@ -65,13 +91,13 @@ export default function App() {
     return INITIAL_DEEPSEEK_CONFIG;
   });
 
-  // Current logged in user (null = unauthenticated / guest)
+  // Current logged in user (null = unauthenticated / guest by default)
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
     const saved = localStorage.getItem('skillhub_user');
     if (saved) {
       try { return JSON.parse(saved); } catch (e) {}
     }
-    return null; // Default to guest as per user requirement
+    return null; // Guest mode by default
   });
 
   // Save current user to LocalStorage
@@ -84,24 +110,24 @@ export default function App() {
   }, [currentUser]);
   
   // Navigation / Routing State with Hash & SessionStorage memory
-  const [currentTab, setCurrentTab] = useState<'market' | 'personal' | 'audit' | 'rules' | 'detail'>(() => {
+  const [currentTab, setCurrentTab] = useState<NavigationTab | 'detail'>(() => {
     try {
       const hash = window.location.hash.replace('#', '');
       if (hash.startsWith('tab=')) {
         const tabVal = hash.split('tab=')[1] as any;
-        if (['market', 'personal', 'audit', 'rules', 'detail'].includes(tabVal)) return tabVal;
+        if (['market', 'demands', 'personal', 'audit', 'rules', 'settings', 'detail'].includes(tabVal)) return tabVal;
       } else if (hash.startsWith('skill=')) {
         return 'detail';
       }
       const savedTab = sessionStorage.getItem('skillhub_active_tab') as any;
-      if (savedTab && ['market', 'personal', 'audit', 'rules', 'detail'].includes(savedTab)) {
+      if (savedTab && ['market', 'demands', 'personal', 'audit', 'rules', 'settings', 'detail'].includes(savedTab)) {
         return savedTab;
       }
     } catch (e) {}
     return 'market';
   });
 
-  const [previousTab, setPreviousTab] = useState<'market' | 'personal' | 'audit'>('market');
+  const [previousTab, setPreviousTab] = useState<NavigationTab>('market');
 
   // Currently inspected skill for full detail page
   const [selectedSkill, setSelectedSkill] = useState<SkillItem | null>(() => {
@@ -127,6 +153,9 @@ export default function App() {
     } catch (e) {}
     return null;
   });
+
+  // Selected demand for detail modal
+  const [selectedDemand, setSelectedDemand] = useState<SkillDemand | null>(null);
 
   // Sync tab & route changes to sessionStorage and hash
   useEffect(() => {
@@ -154,7 +183,7 @@ export default function App() {
         }
       } else if (hash.startsWith('tab=')) {
         const tabVal = hash.split('tab=')[1] as any;
-        if (['market', 'personal', 'audit', 'rules'].includes(tabVal)) {
+        if (['market', 'demands', 'personal', 'audit', 'rules', 'settings'].includes(tabVal)) {
           setCurrentTab(tabVal);
         }
       }
@@ -165,6 +194,7 @@ export default function App() {
 
   // Modals
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showCreateDemandModal, setShowCreateDemandModal] = useState(false);
   const [showRuleModal, setShowRuleModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
@@ -179,8 +209,16 @@ export default function App() {
 
   // Sync to LocalStorage
   useEffect(() => {
+    localStorage.setItem('skillhub_all_users', JSON.stringify(allUsers));
+  }, [allUsers]);
+
+  useEffect(() => {
     localStorage.setItem('skillhub_skills', JSON.stringify(skills));
   }, [skills]);
+
+  useEffect(() => {
+    localStorage.setItem('skillhub_demands', JSON.stringify(demands));
+  }, [demands]);
 
   useEffect(() => {
     localStorage.setItem('skillhub_rules', JSON.stringify(rules));
@@ -244,7 +282,7 @@ export default function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('skillhub_user');
-    if (currentTab === 'audit') {
+    if (currentTab === 'audit' || currentTab === 'rules' || currentTab === 'settings' || currentTab === 'personal') {
       setCurrentTab('market');
     }
     addToast('info', '已退出登录', '当前处于访客模式，仍可自由下载和复制安装指令');
@@ -253,7 +291,7 @@ export default function App() {
   // Navigate to Skill Detail Page
   const handleOpenSkillDetail = (skill: SkillItem) => {
     if (currentTab !== 'detail') {
-      setPreviousTab(currentTab === 'rules' ? 'market' : (currentTab as any));
+      setPreviousTab(currentTab as NavigationTab);
     }
     setSelectedSkill(skill);
     setCurrentTab('detail');
@@ -317,7 +355,7 @@ export default function App() {
     return true;
   };
 
-  // Download & Install Commands (Allowed for Everyone, Unlogged & Logged In)
+  // Download & Install Commands (Allowed for Everyone)
   const handleDownloadZip = async (skill: SkillItem) => {
     try {
       addToast('info', '正在打包源码', `正在生成 ${skill.slug} 的 ZIP 文件结构...`);
@@ -337,8 +375,8 @@ export default function App() {
     }
   };
 
-  const handleCopyCommand = (cmd: string, clientName: string) => {
-    addToast('success', '指令已复制', `已复制 ${clientName} 安装命令至剪贴板`);
+  const handleCopyCommand = (cmd: string, clientName?: string) => {
+    addToast('success', '指令已复制', `已复制 ${clientName || '安装'} 命令至剪贴板`);
   };
 
   // Re-scan detail skill (Guarded)
@@ -367,6 +405,223 @@ export default function App() {
   const handleCreateSkill = (newSkill: SkillItem) => {
     setSkills(prev => [newSkill, ...prev]);
     setCurrentTab('personal');
+  };
+
+  // ==========================================
+  // SKILL DEMANDS CRUD & WORKFLOW HANDLERS
+  // ==========================================
+  const handleCreateDemand = (newDemandData: Omit<SkillDemand, 'id' | 'createdAt' | 'updatedAt' | 'submissionsCount'>) => {
+    if (!currentUser) return;
+    
+    // Deduct user points
+    const pointsCost = newDemandData.bountyPoints;
+    const remainingPoints = (currentUser.points ?? 10000) - pointsCost;
+
+    const updatedUser: UserAccount = {
+      ...currentUser,
+      points: Math.max(0, remainingPoints)
+    };
+
+    setCurrentUser(updatedUser);
+    setAllUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
+
+    const newDemand: SkillDemand = {
+      ...newDemandData,
+      id: `demand-${Date.now()}`,
+      submissionsCount: 0,
+      candidates: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    setDemands(prev => [newDemand, ...prev]);
+    addToast('success', '需求已提交审核', `已扣除 ${pointsCost} 奖励积分，管理员审核通过后将在征集广场展示！`);
+  };
+
+  const handleApproveDemand = (demandId: string) => {
+    if (!currentUser || (currentUser.role !== 'super_admin' && currentUser.role !== 'admin')) {
+      addToast('warning', '权限不足', '仅管理员可审核征集需求');
+      return;
+    }
+
+    setDemands(prev =>
+      prev.map(d => {
+        if (d.id === demandId) {
+          return {
+            ...d,
+            status: 'approved',
+            reviewedBy: `${currentUser.name} (${currentUser.role === 'super_admin' ? '超级管理员' : '管理员'})`,
+            reviewedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return d;
+      })
+    );
+
+    if (selectedDemand?.id === demandId) {
+      setSelectedDemand(prev => prev ? {
+        ...prev,
+        status: 'approved',
+        reviewedBy: currentUser.name,
+        reviewedAt: new Date().toISOString()
+      } : null);
+    }
+
+    addToast('success', '需求审核通过', '该技能征集需求已在全站征集广场公开！');
+  };
+
+  const handleRejectDemand = (demandId: string, reason: string) => {
+    if (!currentUser || (currentUser.role !== 'super_admin' && currentUser.role !== 'admin')) {
+      addToast('warning', '权限不足', '仅管理员可驳回征集需求');
+      return;
+    }
+
+    const targetDemand = demands.find(d => d.id === demandId);
+    if (!targetDemand) return;
+
+    // Refund bounty points to author
+    const authorId = targetDemand.author.id;
+    setAllUsers(prev => prev.map(u => {
+      if (u.id === authorId) {
+        return { ...u, points: (u.points ?? 10000) + targetDemand.bountyPoints };
+      }
+      return u;
+    }));
+
+    if (currentUser.id === authorId) {
+      setCurrentUser(prev => prev ? { ...prev, points: (prev.points ?? 10000) + targetDemand.bountyPoints } : null);
+    }
+
+    setDemands(prev =>
+      prev.map(d => {
+        if (d.id === demandId) {
+          return {
+            ...d,
+            status: 'rejected',
+            rejectReason: reason,
+            reviewedBy: `${currentUser.name} (${currentUser.role === 'super_admin' ? '超级管理员' : '管理员'})`,
+            reviewedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return d;
+      })
+    );
+
+    if (selectedDemand?.id === demandId) {
+      setSelectedDemand(prev => prev ? {
+        ...prev,
+        status: 'rejected',
+        rejectReason: reason,
+        reviewedBy: currentUser.name
+      } : null);
+    }
+
+    addToast('info', '需求已驳回并退还积分', `已将 ${targetDemand.bountyPoints} 积分退回发布者账户`);
+  };
+
+  const handleDeleteDemand = (demandId: string) => {
+    const targetDemand = demands.find(d => d.id === demandId);
+    if (!targetDemand) return;
+
+    const isAuthor = currentUser?.id === targetDemand.author.id;
+    const isSuperAdmin = currentUser?.role === 'super_admin';
+    const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
+
+    if (!isAuthor && !isAdmin) {
+      addToast('warning', '权限不足', '仅需求发布者或管理员有权删除该需求');
+      return;
+    }
+
+    // If demand was pending or active, refund points to author if author deletes or admin deletes
+    if (targetDemand.status === 'pending' || targetDemand.status === 'approved') {
+      const authorId = targetDemand.author.id;
+      setAllUsers(prev => prev.map(u => {
+        if (u.id === authorId) {
+          return { ...u, points: (u.points ?? 10000) + targetDemand.bountyPoints };
+        }
+        return u;
+      }));
+
+      if (currentUser?.id === authorId) {
+        setCurrentUser(prev => prev ? { ...prev, points: (prev.points ?? 10000) + targetDemand.bountyPoints } : null);
+      }
+    }
+
+    setDemands(prev => prev.filter(d => d.id !== demandId));
+    if (selectedDemand?.id === demandId) {
+      setSelectedDemand(null);
+    }
+
+    addToast('success', '需求已删除', '已成功删除该技能征集需求记录');
+  };
+
+  const handleSubmitDemandSolution = (demandId: string, solutionNote: string, skillId?: string) => {
+    if (!requireAuth('提交技能方案')) return;
+    if (!currentUser) return;
+
+    const matchedSkill = skillId ? skills.find(s => s.id === skillId) : undefined;
+    const candidate: SkillDemandCandidate = {
+      id: `cand-${Date.now()}`,
+      skillId,
+      skillName: matchedSkill ? matchedSkill.name : '开发者定制方案',
+      submitterId: currentUser.id,
+      submitterName: currentUser.name,
+      submitterAvatar: currentUser.avatar,
+      submittedAt: new Date().toISOString(),
+      notes: solutionNote,
+      status: 'pending'
+    };
+
+    setDemands(prev =>
+      prev.map(d => {
+        if (d.id === demandId) {
+          const updatedCandidates = [...(d.candidates || []), candidate];
+          return {
+            ...d,
+            submissionsCount: updatedCandidates.length,
+            candidates: updatedCandidates,
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return d;
+      })
+    );
+
+    if (selectedDemand?.id === demandId) {
+      setSelectedDemand(prev => prev ? {
+        ...prev,
+        submissionsCount: (prev.candidates?.length || 0) + 1,
+        candidates: [...(prev.candidates || []), candidate]
+      } : null);
+    }
+
+    addToast('success', '方案提交成功', '需求发布者将收到通知并进行验收！');
+  };
+
+  // ==========================================
+  // SUPER ADMIN USER PROMOTION & PERMISSIONS
+  // ==========================================
+  const handleUpdateUserRole = (userId: string, newRole: UserRole) => {
+    if (!currentUser || currentUser.role !== 'super_admin') {
+      addToast('error', '越权操作', '仅超级管理员有权分配或调整管理员权限！');
+      return;
+    }
+
+    setAllUsers(prev =>
+      prev.map(u => {
+        if (u.id === userId) {
+          return { ...u, role: newRole };
+        }
+        return u;
+      })
+    );
+
+    // If current logged-in user is updated
+    if (currentUser.id === userId) {
+      setCurrentUser(prev => prev ? { ...prev, role: newRole } : null);
+    }
   };
 
   // Admin audit handlers
@@ -415,7 +670,7 @@ export default function App() {
   };
 
   const handleDelistSkill = (id: string) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'super_admin')) return;
     setSkills(prev =>
       prev.map(s => {
         if (s.id === id) {
@@ -434,7 +689,7 @@ export default function App() {
   };
 
   const handleRelistSkill = (id: string) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'super_admin')) return;
     setSkills(prev =>
       prev.map(s => {
         if (s.id === id) {
@@ -453,7 +708,7 @@ export default function App() {
   };
 
   const handleDeleteSkill = (id: string) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'super_admin')) return;
     setSkills(prev => prev.filter(s => s.id !== id));
     if (selectedSkill && selectedSkill.id === id) {
       setSelectedSkill(null);
@@ -494,11 +749,17 @@ export default function App() {
     setFeedbackList(prev => [fb, ...prev]);
   };
 
-  const pendingReviewsCount = skills.filter(s => s.status === 'pending').length;
+  const pendingSkillReviewsCount = skills.filter(s => s.status === 'pending').length;
+  const pendingDemandReviewsCount = demands.filter(d => d.status === 'pending').length;
+  const totalPendingReviewsCount = pendingSkillReviewsCount + pendingDemandReviewsCount;
+  
   const starredCount = skills.filter(s => s.isStarred).length;
   const mySubmissionsCount = currentUser ? skills.filter(s => 
     s.author.name === currentUser.name || s.author.name === 'Alex Chen' || s.author.name === '林晨 (开发架构组)'
   ).length : 0;
+
+  const isSuperAdmin = currentUser?.role === 'super_admin';
+  const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
@@ -511,7 +772,7 @@ export default function App() {
               requireAuth('配置风控中心');
               return;
             }
-            if (currentUser.role !== 'admin') {
+            if (!isAdmin) {
               addToast('warning', '权限不足', '风控中心仅限超级管理员配置');
               return;
             }
@@ -521,11 +782,21 @@ export default function App() {
               requireAuth('访问审核管理中心');
               return;
             }
-            if (currentUser.role !== 'admin') {
-              addToast('warning', '权限不足', '审核管理中心仅限超级管理员访问');
+            if (!isAdmin) {
+              addToast('warning', '权限不足', '审核管理中心仅限管理员访问');
               return;
             }
             setCurrentTab('audit');
+          } else if (tab === 'settings') {
+            if (!currentUser) {
+              requireAuth('访问权限设置中心');
+              return;
+            }
+            if (!isSuperAdmin) {
+              addToast('error', '权限不足', '权限设置中心仅限超级管理员访问');
+              return;
+            }
+            setCurrentTab('settings');
           } else {
             setCurrentTab(tab);
           }
@@ -533,6 +804,11 @@ export default function App() {
         onOpenUpload={() => {
           if (requireAuth('发布新技能')) {
             setShowUploadModal(true);
+          }
+        }}
+        onOpenCreateDemand={() => {
+          if (requireAuth('发布技能征集')) {
+            setShowCreateDemandModal(true);
           }
         }}
         onOpenCommandPalette={() => setShowCommandPalette(true)}
@@ -546,19 +822,23 @@ export default function App() {
           setShowLoginModal(true);
         }}
         currentUser={currentUser}
-        allUsers={INITIAL_USERS}
+        allUsers={allUsers}
         onSwitchUser={(user) => {
           setCurrentUser(user);
-          // If switching to non-admin while on admin pages, redirect to market
-          if (user.role !== 'admin' && (currentTab === 'audit' || currentTab === 'rules')) {
+          // If switching to non-superadmin while on settings, redirect to market
+          if (user.role !== 'super_admin' && currentTab === 'settings') {
             setCurrentTab('market');
           }
-          addToast('info', '身份已切换', `当前操作身份：${user.name} (${user.role === 'admin' ? '超级管理员' : '普通用户'})`);
+          if (user.role === 'developer' && (currentTab === 'audit' || currentTab === 'rules')) {
+            setCurrentTab('market');
+          }
+          addToast('info', '身份已切换', `当前操作身份：${user.name} (${user.role === 'super_admin' ? '超级管理员' : user.role === 'admin' ? '管理员' : '普通开发者'})`);
         }}
         onLogout={handleLogout}
-        pendingReviewsCount={pendingReviewsCount}
+        pendingReviewsCount={totalPendingReviewsCount}
         starredCount={starredCount}
         mySubmissionsCount={mySubmissionsCount}
+        isSuperAdmin={isSuperAdmin}
       />
 
       {/* Main Content Area */}
@@ -573,6 +853,7 @@ export default function App() {
                 setShowUploadModal(true);
               }
             }}
+            onOpenDemands={() => setCurrentTab('demands')}
             onToggleStar={handleToggleStar}
             onToggleLike={handleToggleLike}
             onDownloadZip={handleDownloadZip}
@@ -580,7 +861,30 @@ export default function App() {
           />
         )}
 
-        {/* VIEW 2: SKILL DETAIL PAGE (FULL PAGE) */}
+        {/* VIEW 2: DEMANDS MARKET */}
+        {currentTab === 'demands' && (
+          <SkillDemandMarketView
+            demands={demands}
+            currentUser={currentUser}
+            availableSkills={skills}
+            onOpenCreateDemand={() => {
+              if (requireAuth('发布技能征集')) {
+                setShowCreateDemandModal(true);
+              }
+            }}
+            onSelectDemand={(demand) => setSelectedDemand(demand)}
+            onApproveDemand={handleApproveDemand}
+            onRejectDemand={handleRejectDemand}
+            onDeleteDemand={handleDeleteDemand}
+            onOpenLogin={() => {
+              setLoginActionHint('发布技能征集');
+              setShowLoginModal(true);
+            }}
+            onToast={addToast}
+          />
+        )}
+
+        {/* VIEW 3: SKILL DETAIL PAGE (FULL PAGE) */}
         {currentTab === 'detail' && selectedSkill && (
           <SkillDetailPage
             skill={selectedSkill}
@@ -594,12 +898,14 @@ export default function App() {
           />
         )}
 
-        {/* VIEW 3: PERSONAL CENTER (STARRED SKILLS & USER SUBMISSION TRACKER) */}
+        {/* VIEW 4: PERSONAL CENTER (STARRED, MY SUBMISSIONS & MY DEMANDS) */}
         {currentTab === 'personal' && (
           <PersonalCenterView
             currentUser={currentUser}
             allSkills={skills}
+            allDemands={demands}
             onSelectSkill={handleOpenSkillDetail}
+            onSelectDemand={(demand) => setSelectedDemand(demand)}
             onToggleStar={handleToggleStar}
             onToggleLike={handleToggleLike}
             onDownloadZip={handleDownloadZip}
@@ -608,20 +914,26 @@ export default function App() {
                 setShowUploadModal(true);
               }
             }}
+            onOpenCreateDemandModal={() => {
+              if (requireAuth('发布技能征集')) {
+                setShowCreateDemandModal(true);
+              }
+            }}
             onOpenLogin={() => {
               setLoginActionHint('查看个人中心数据');
               setShowLoginModal(true);
             }}
             onCopyInstallCmd={(cmd) => addToast('success', '安装命令已复制', cmd)}
+            onDeleteDemand={handleDeleteDemand}
             onToast={addToast}
           />
         )}
 
-        {/* VIEW 4: ADMIN AUDIT MANAGEMENT (RBAC GUARDED) */}
+        {/* VIEW 5: ADMIN AUDIT MANAGEMENT */}
         {currentTab === 'audit' && (
-          currentUser && currentUser.role === 'admin' ? (
+          isAdmin ? (
             <AuditManagementView
-              currentUser={currentUser}
+              currentUser={currentUser!}
               skills={skills}
               rules={rules}
               deepseekConfig={deepseekConfig}
@@ -638,9 +950,9 @@ export default function App() {
               <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center font-bold mx-auto">
                 !
               </div>
-              <h2 className="text-lg font-bold text-slate-900">需要超级管理员权限</h2>
+              <h2 className="text-lg font-bold text-slate-900">需要管理员权限</h2>
               <p className="text-xs text-slate-500">
-                审核管理中心与双引擎风控核验属于企业超级管理员专属模块。请登录并切换为管理员身份体验。
+                审核管理中心属于企业管理员专属模块。请登录并切换为管理员或超级管理员身份体验。
               </p>
               <div className="flex items-center justify-center gap-3 pt-2">
                 <button
@@ -662,11 +974,12 @@ export default function App() {
             </div>
           )
         )}
-        {/* VIEW 5: SUPER ADMIN RISK CONTROL CENTER & DEEPSEEK GATEWAY (FULL PAGE) */}
+
+        {/* VIEW 6: RISK CONTROL CENTER (风控中心) */}
         {currentTab === 'rules' && (
-          currentUser && currentUser.role === 'admin' ? (
+          isAdmin ? (
             <RuleManagementView
-              currentUser={currentUser}
+              currentUser={currentUser!}
               rules={rules}
               deepseekConfig={deepseekConfig}
               onSaveDeepSeekConfig={(cfg) => setDeepseekConfig(cfg)}
@@ -680,9 +993,9 @@ export default function App() {
               <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center font-bold mx-auto">
                 !
               </div>
-              <h2 className="text-lg font-bold text-slate-900">需要超级管理员权限</h2>
+              <h2 className="text-lg font-bold text-slate-900">需要管理员权限</h2>
               <p className="text-xs text-slate-500">
-                风控中心属于超级管理员专属模块。请登录并切换为管理员身份配置。
+                风控中心属于管理员专属模块。请登录并切换为管理员身份配置。
               </p>
               <div className="flex items-center justify-center gap-3 pt-2">
                 <button
@@ -704,6 +1017,45 @@ export default function App() {
             </div>
           )
         )}
+
+        {/* VIEW 7: SUPER ADMIN PERMISSIONS & USER ROLES SETTINGS */}
+        {currentTab === 'settings' && (
+          isSuperAdmin ? (
+            <AdminSettingsView
+              currentUser={currentUser}
+              users={allUsers}
+              onUpdateUserRole={handleUpdateUserRole}
+              onToast={addToast}
+            />
+          ) : (
+            <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 space-y-4 max-w-lg mx-auto">
+              <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-800 flex items-center justify-center font-bold mx-auto">
+                !
+              </div>
+              <h2 className="text-lg font-bold text-slate-900">仅限超级管理员访问</h2>
+              <p className="text-xs text-slate-500">
+                权限设置中心仅允许超级管理员（Super Admin）管理管理员席位与成员授权。
+              </p>
+              <div className="flex items-center justify-center gap-3 pt-2">
+                <button
+                  onClick={() => setCurrentTab('market')}
+                  className="px-5 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200"
+                >
+                  返回技能集市
+                </button>
+                <button
+                  onClick={() => {
+                    setLoginActionHint('访问权限设置中心');
+                    setShowLoginModal(true);
+                  }}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold shadow-sm hover:bg-indigo-700"
+                >
+                  登录超级管理员
+                </button>
+              </div>
+            </div>
+          )
+        )}
       </main>
 
       {/* Footer */}
@@ -712,10 +1064,17 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span className="font-bold text-slate-800">SkillHub 企业内网 AI 技能市场</span>
             <span>·</span>
-            <span>双引擎安全风控引擎 v3.4 (驱动: {deepseekConfig.modelName})</span>
+            <span>风控中心 v3.4 (驱动: {deepseekConfig.modelName})</span>
           </div>
           <div className="flex items-center gap-4">
-            {currentUser?.role === 'admin' && (
+            <button
+              onClick={() => setCurrentTab('demands')}
+              className="hover:text-indigo-600 transition-colors font-medium"
+            >
+              征集广场
+            </button>
+            <span>·</span>
+            {isAdmin && (
               <>
                 <button
                   onClick={() => setCurrentTab('rules')}
@@ -726,13 +1085,17 @@ export default function App() {
                 <span>·</span>
               </>
             )}
-            <button
-              onClick={() => setCurrentTab('personal')}
-              className="hover:text-indigo-600 transition-colors font-medium"
-            >
-              个人中心
-            </button>
-            <span>·</span>
+            {currentUser && (
+              <>
+                <button
+                  onClick={() => setCurrentTab('personal')}
+                  className="hover:text-indigo-600 transition-colors font-medium"
+                >
+                  个人中心
+                </button>
+                <span>·</span>
+              </>
+            )}
             <button
               onClick={() => {
                 if (requireAuth('提交全站反馈')) {
@@ -754,7 +1117,7 @@ export default function App() {
           isOpen={showLoginModal}
           onClose={() => setShowLoginModal(false)}
           onLogin={handleLogin}
-          allUsers={INITIAL_USERS}
+          allUsers={allUsers}
           actionHint={loginActionHint}
         />
       )}
@@ -771,8 +1134,39 @@ export default function App() {
         />
       )}
 
-      {/* 3. Rule Management Modal (Admin) */}
-      {showRuleModal && currentUser?.role === 'admin' && (
+      {/* 3. Create Skill Demand Modal */}
+      {showCreateDemandModal && (
+        <CreateSkillDemandModal
+          isOpen={showCreateDemandModal}
+          currentUser={currentUser}
+          onClose={() => setShowCreateDemandModal(false)}
+          onSubmitDemand={handleCreateDemand}
+          onOpenLogin={() => {
+            setLoginActionHint('发布技能征集');
+            setShowLoginModal(true);
+          }}
+          onToast={addToast}
+        />
+      )}
+
+      {/* 4. Skill Demand Detail Modal */}
+      {selectedDemand && (
+        <SkillDemandDetailModal
+          demand={selectedDemand}
+          currentUser={currentUser}
+          availableSkills={skills}
+          isOpen={!!selectedDemand}
+          onClose={() => setSelectedDemand(null)}
+          onApproveDemand={handleApproveDemand}
+          onRejectDemand={handleRejectDemand}
+          onDeleteDemand={handleDeleteDemand}
+          onSubmitResponse={handleSubmitDemandSolution}
+          onToast={addToast}
+        />
+      )}
+
+      {/* 5. Rule Management Modal (Admin) */}
+      {showRuleModal && isAdmin && (
         <RuleManagementModal
           rules={rules}
           deepseekConfig={deepseekConfig}
@@ -787,7 +1181,7 @@ export default function App() {
         />
       )}
 
-      {/* 4. Feedback Modal */}
+      {/* 6. Feedback Modal */}
       {showFeedbackModal && currentUser && (
         <FeedbackModal
           currentUser={currentUser}
@@ -797,7 +1191,7 @@ export default function App() {
         />
       )}
 
-      {/* 5. Command Palette Modal (⌘K) */}
+      {/* 7. Command Palette Modal (⌘K) */}
       <CommandPaletteModal
         isOpen={showCommandPalette}
         onClose={() => setShowCommandPalette(false)}
@@ -814,7 +1208,7 @@ export default function App() {
               requireAuth('配置风控中心');
               return;
             }
-            if (currentUser.role === 'admin') setCurrentTab('rules');
+            if (isAdmin) setCurrentTab('rules');
             else addToast('warning', '权限不足', '风控中心仅限超级管理员配置');
           }
           if (tab === 'audit') {
@@ -822,20 +1216,20 @@ export default function App() {
               requireAuth('访问审核管理中心');
               return;
             }
-            if (currentUser.role === 'admin') setCurrentTab('audit');
-            else addToast('warning', '权限不足', '审核管理中心仅限超级管理员访问');
+            if (isAdmin) setCurrentTab('audit');
+            else addToast('warning', '权限不足', '审核管理中心仅限管理员访问');
           }
         }}
       />
 
-      {/* 6. Floating Back to Top and Feedback Widget */}
+      {/* 8. Floating Back to Top and Feedback Widget */}
       <BackToTop onOpenFeedback={() => {
         if (requireAuth('提交全站反馈')) {
           setShowFeedbackModal(true);
         }
       }} />
 
-      {/* 7. Toast Alerts */}
+      {/* 9. Toast Alerts */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );

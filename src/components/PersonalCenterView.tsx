@@ -21,39 +21,58 @@ import {
   Filter,
   Check,
   ChevronRight,
-  ShieldAlert
+  ShieldAlert,
+  Coins,
+  PlusCircle,
+  Trash2,
+  Settings,
+  MessageSquare,
+  Shield
 } from 'lucide-react';
-import { SkillItem, UserAccount } from '../types';
+import { SkillItem, UserAccount, SkillDemand } from '../types';
 import { SkillCard } from './SkillCard';
+import { getExpertDomainMeta } from '../data/expertDomains';
 
 interface PersonalCenterViewProps {
   currentUser: UserAccount | null;
   allSkills: SkillItem[];
+  allDemands: SkillDemand[];
   onSelectSkill: (skill: SkillItem) => void;
+  onSelectDemand: (demand: SkillDemand) => void;
   onToggleStar: (id: string) => void;
   onToggleLike: (id: string) => void;
   onDownloadZip: (skill: SkillItem) => void;
   onOpenUploadModal: () => void;
+  onOpenCreateDemand?: () => void;
+  onOpenCreateDemandModal?: () => void;
+  onDeleteDemand: (id: string) => void;
+  onOpenSettings?: () => void;
   onOpenLogin: () => void;
   onCopyInstallCmd: (cmd: string) => void;
   onToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, message: string) => void;
 }
 
-type PersonalTab = 'starred' | 'submissions' | 'liked';
+type PersonalTab = 'starred' | 'submissions' | 'demands' | 'liked';
 
 export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
   currentUser,
   allSkills,
+  allDemands,
   onSelectSkill,
+  onSelectDemand,
   onToggleStar,
   onToggleLike,
   onDownloadZip,
   onOpenUploadModal,
+  onOpenCreateDemand,
+  onOpenCreateDemandModal,
+  onDeleteDemand,
+  onOpenSettings,
   onOpenLogin,
   onCopyInstallCmd,
   onToast
 }) => {
-  const [activeTab, setActiveTab] = useState<PersonalTab>('starred');
+  const [activeTab, setActiveTab] = useState<PersonalTab>('demands');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Unauthenticated Guard
@@ -68,7 +87,7 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
             登录后查看个人中心
           </h2>
           <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
-            您当前处于游客浏览状态。登录企业账号后，即可集中查看您已收藏的技能、已点赞插件，以及管理您提交发布的 MCP 扩展和审核进度。
+            您当前处于未登录状态。登录企业账号后即可使用您的 <strong className="text-indigo-600 font-bold">10,000 奖励积分</strong> 发起技能征集、管理发布的技能插件以及查看收藏夹。
           </p>
         </div>
 
@@ -78,11 +97,10 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
             <span>登录后尊享以下功能：</span>
           </div>
           <ul className="space-y-1.5 list-disc list-inside text-slate-600 pl-1 text-[11px]">
+            <li>获得 <strong>10,000 奖励积分</strong>，随时发起业务痛点技能征集需求</li>
             <li>一键收藏心仪技能并在个人中心快速检索</li>
-            <li>为优质团队插件点赞互动</li>
             <li>发布个人/团队的 MCP Server 与 Agent 技能</li>
             <li>提交全站产品建议与使用反馈</li>
-            <li>对已有技能发起双引擎安全实时体检</li>
           </ul>
         </div>
 
@@ -100,13 +118,18 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
     );
   }
 
+  const isSuperAdmin = currentUser.role === 'super_admin';
+  const isAdmin = currentUser.role === 'admin' || isSuperAdmin;
+
   // Derived data
   const starredSkills = allSkills.filter(s => s.isStarred);
   const likedSkills = allSkills.filter(s => s.isLiked);
-  // Match submissions by author name or email or current user id
   const mySubmissions = allSkills.filter(s => 
     s.author.name === currentUser.name || s.author.name === 'Alex Chen' || s.author.name === '林晨 (开发架构组)'
   );
+  
+  // My Demands
+  const myDemands = allDemands.filter(d => d.author.id === currentUser.id);
 
   const filteredStarred = starredSkills.filter(s =>
     s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -124,16 +147,21 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
     s.slug.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const filteredDemands = myDemands.filter(d =>
+    d.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    d.description.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   const approvedCount = mySubmissions.filter(s => s.status === 'approved').length;
   const pendingCount = mySubmissions.filter(s => s.status === 'pending').length;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200 pb-12">
+    <div className="space-y-6 animate-in fade-in duration-200 pb-12 text-left">
       {/* Profile Overview Card */}
       <div className="p-6 sm:p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-indigo-50/70 via-sky-50/40 to-transparent rounded-full blur-2xl pointer-events-none" />
+        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-amber-50/60 via-indigo-50/40 to-transparent rounded-full blur-2xl pointer-events-none" />
 
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="flex items-center gap-4">
             <div className="relative">
               <img
@@ -146,45 +174,120 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
               </span>
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
                   {currentUser.name}
                 </h1>
                 <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold border ${
-                  currentUser.role === 'admin'
+                  isSuperAdmin
+                    ? 'bg-amber-50 text-amber-800 border-amber-300'
+                    : isAdmin
                     ? 'bg-purple-50 text-purple-700 border-purple-200'
                     : 'bg-indigo-50 text-indigo-700 border-indigo-200'
                 }`}>
-                  {currentUser.role === 'admin' ? '🛡️ 超级管理员 / 安全总监' : '💻 研发工程师 / 技能创作者'}
+                  {isSuperAdmin ? '🛡️ 超级管理员' : isAdmin ? '⚙️ 系统管理员' : '💻 研发工程师 / 创作者'}
                 </span>
               </div>
 
               <div className="text-xs text-slate-500 font-medium flex items-center gap-3 flex-wrap">
-                <span>{currentUser.department}</span>
+                <span>{currentUser.department} {currentUser.title ? `(${currentUser.title})` : ''}</span>
                 <span>•</span>
                 <span className="font-mono">{currentUser.email}</span>
                 <span>•</span>
-                <span>内网工号 #{currentUser.id.replace('user-', '')}</span>
+                <span>工号 #{currentUser.id}</span>
               </div>
             </div>
           </div>
 
-          {/* Quick Upload CTA */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onOpenUploadModal}
-              id="btn-personal-upload-skill"
-              className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-md shadow-indigo-500/20 active:scale-95 shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              <span>发布新技能 / 插件</span>
-            </button>
+          {/* Points Card and Action CTAs */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            {/* Points Badge Card */}
+            <div className="p-3.5 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200/90 text-amber-950 flex items-center gap-3 shadow-2xs">
+              <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-base shadow-sm">
+                🪙
+              </div>
+              <div>
+                <div className="text-[11px] text-amber-800 font-medium">我的奖励积分</div>
+                <div className="text-lg font-black text-slate-900 leading-tight">
+                  {currentUser.points.toLocaleString()} <span className="text-xs font-normal text-slate-500">积分</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Post Skill Demand Button */}
+              <button
+                onClick={onOpenCreateDemand || onOpenCreateDemandModal}
+                id="btn-personal-create-demand"
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition-all shadow-md shadow-amber-500/20 active:scale-95 shrink-0"
+              >
+                <Coins className="w-4 h-4 text-slate-950" />
+                <span>发布技能征集</span>
+              </button>
+
+              {/* Upload Skill Button */}
+              <button
+                onClick={onOpenUploadModal}
+                id="btn-personal-upload-skill"
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-md shadow-indigo-500/20 active:scale-95 shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>发布新技能</span>
+              </button>
+
+              {/* Super Admin Settings Shortcut */}
+              {isSuperAdmin && onOpenSettings && (
+                <button
+                  onClick={onOpenSettings}
+                  className="p-2.5 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all shadow-2xs"
+                  title="超级管理员系统权限设置"
+                >
+                  <Settings className="w-4 h-4 text-indigo-600" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Counters Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-slate-100">
+          <div 
+            onClick={() => setActiveTab('demands')}
+            className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
+              activeTab === 'demands' ? 'bg-amber-50/70 border-amber-300 ring-2 ring-amber-400/20' : 'bg-slate-50/70 border-slate-200/80 hover:bg-slate-100/60'
+            }`}
+          >
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span className="font-semibold">我发布的技能征集</span>
+              <Coins className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="text-2xl font-black text-slate-900 mt-1">
+              {myDemands.length}
+            </div>
+            <div className="text-[11px] text-amber-700 font-semibold mt-0.5">
+              {myDemands.filter(d => d.status === 'open' || d.status === 'approved').length} 征集中 · {myDemands.filter(d => d.status === 'pending').length} 待审
+            </div>
+          </div>
+
+          <div 
+            onClick={() => setActiveTab('submissions')}
+            className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
+              activeTab === 'submissions' ? 'bg-indigo-50/70 border-indigo-300 ring-2 ring-indigo-400/20' : 'bg-slate-50/70 border-slate-200/80 hover:bg-slate-100/60'
+            }`}
+          >
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span className="font-semibold">我上传的技能插件</span>
+              <Upload className="w-4 h-4 text-indigo-600" />
+            </div>
+            <div className="text-2xl font-black text-slate-900 mt-1">
+              {mySubmissions.length}
+            </div>
+            <div className="text-[11px] text-indigo-600 font-semibold mt-0.5">
+              {approvedCount} 已上线 · {pendingCount} 审核中
+            </div>
+          </div>
+
           <div 
             onClick={() => setActiveTab('starred')}
             className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
@@ -202,24 +305,6 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
           </div>
 
           <div 
-            onClick={() => setActiveTab('submissions')}
-            className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
-              activeTab === 'submissions' ? 'bg-indigo-50/70 border-indigo-300 ring-2 ring-indigo-400/20' : 'bg-slate-50/70 border-slate-200/80 hover:bg-slate-100/60'
-            }`}
-          >
-            <div className="flex items-center justify-between text-xs text-slate-500">
-              <span className="font-semibold">我的提交 & 进度</span>
-              <Upload className="w-4 h-4 text-indigo-600" />
-            </div>
-            <div className="text-2xl font-black text-slate-900 mt-1">
-              {mySubmissions.length}
-            </div>
-            <div className="text-[11px] text-indigo-600 font-semibold mt-0.5">
-              {approvedCount} 已上线 · {pendingCount} 审核中
-            </div>
-          </div>
-
-          <div 
             onClick={() => setActiveTab('liked')}
             className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
               activeTab === 'liked' ? 'bg-rose-50/70 border-rose-300 ring-2 ring-rose-400/20' : 'bg-slate-50/70 border-slate-200/80 hover:bg-slate-100/60'
@@ -232,18 +317,7 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
             <div className="text-2xl font-black text-slate-900 mt-1">
               {likedSkills.length}
             </div>
-            <div className="text-[11px] text-slate-400 mt-0.5">全站高赞优秀实践</div>
-          </div>
-
-          <div className="p-3.5 rounded-2xl border border-slate-200/80 bg-slate-50/70">
-            <div className="flex items-center justify-between text-xs text-slate-500">
-              <span className="font-semibold">双引擎初筛通过率</span>
-              <ShieldCheck className="w-4 h-4 text-emerald-600" />
-            </div>
-            <div className="text-2xl font-black text-emerald-600 mt-1">
-              100%
-            </div>
-            <div className="text-[11px] text-slate-400 mt-0.5">企业代码规范与安全</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">全站优秀实践</div>
           </div>
         </div>
       </div>
@@ -251,6 +325,32 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
       {/* Tabs Menu & Search Filter Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
         <div className="flex items-center gap-1.5 overflow-x-auto">
+          <button
+            onClick={() => setActiveTab('demands')}
+            id="tab-personal-demands"
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'demands'
+                ? 'bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <Coins className="w-3.5 h-3.5 text-amber-500" />
+            <span>我发布的技能征集 ({myDemands.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('submissions')}
+            id="tab-personal-submissions"
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'submissions'
+                ? 'bg-indigo-50 text-indigo-900 border border-indigo-200 shadow-2xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <Upload className="w-3.5 h-3.5 text-indigo-600" />
+            <span>我上传的技能插件 ({mySubmissions.length})</span>
+          </button>
+
           <button
             onClick={() => setActiveTab('starred')}
             id="tab-personal-starred"
@@ -265,19 +365,6 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
           </button>
 
           <button
-            onClick={() => setActiveTab('submissions')}
-            id="tab-personal-submissions"
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeTab === 'submissions'
-                ? 'bg-indigo-50 text-indigo-900 border border-indigo-200 shadow-2xs'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-            }`}
-          >
-            <Upload className="w-3.5 h-3.5 text-indigo-600" />
-            <span>我上传提交的插件 & 进度 ({mySubmissions.length})</span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('liked')}
             id="tab-personal-liked"
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
@@ -287,7 +374,7 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
             }`}
           >
             <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" />
-            <span>我点赞的技能 ({likedSkills.length})</span>
+            <span>点赞技能 ({likedSkills.length})</span>
           </button>
         </div>
 
@@ -298,13 +385,144 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="搜索个人技能或提交记录..."
+            placeholder="搜索个人需求、技能或提交..."
             className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
           />
         </div>
       </div>
 
-      {/* TAB 1: MY STARRED SKILLS */}
+      {/* TAB: MY DEMANDS */}
+      {activeTab === 'demands' && (
+        <div className="space-y-4">
+          {filteredDemands.length === 0 ? (
+            <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 text-slate-400 space-y-3 shadow-2xs">
+              <Coins className="w-12 h-12 text-amber-400 mx-auto" />
+              <div className="text-base font-bold text-slate-700">暂无发布的技能征集需求</div>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                遇到业务研发痛点？立即使用您的 10,000 积分设定奖励，发起技能征集让团队专家为你量身定制！
+              </p>
+              <button
+                onClick={onOpenCreateDemand}
+                className="px-5 py-2.5 rounded-xl bg-amber-500 text-slate-950 text-xs font-black shadow-md hover:bg-amber-400 transition-all inline-flex items-center gap-1.5"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>立即发布首个技能征集需求</span>
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3.5">
+              {filteredDemands.map(demand => {
+                const domainMeta = getExpertDomainMeta(demand.targetDomain);
+                return (
+                  <div
+                    key={demand.id}
+                    className="p-5 rounded-3xl bg-white border border-slate-200 shadow-2xs space-y-4 hover:border-amber-300 transition-colors"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${domainMeta.badgeBg} ${domainMeta.badgeText} ${domainMeta.border}`}>
+                            {domainMeta.shortLabel}
+                          </span>
+                          <h3 
+                            onClick={() => onSelectDemand(demand)}
+                            className="text-base font-bold text-slate-900 hover:text-indigo-600 cursor-pointer transition-colors"
+                          >
+                            {demand.title}
+                          </h3>
+                        </div>
+                        <div className="text-xs text-slate-500 line-clamp-2">
+                          {demand.description}
+                        </div>
+                      </div>
+
+                      {/* Status & Bounty */}
+                      <div className="flex items-center gap-2.5 shrink-0 self-start sm:self-center">
+                        <div className="px-3 py-1 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 font-black text-xs flex items-center gap-1">
+                          <span>🪙</span>
+                          <span>{demand.bountyPoints.toLocaleString()} 积分</span>
+                        </div>
+
+                        {(demand.status === 'open' || demand.status === 'approved') && (
+                          <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            征集中
+                          </span>
+                        )}
+                        {demand.status === 'pending' && (
+                          <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5" />
+                            待管理员审核
+                          </span>
+                        )}
+                        {demand.status === 'rejected' && (
+                          <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-1">
+                            <XCircle className="w-3.5 h-3.5" />
+                            已被驳回
+                          </span>
+                        )}
+                        {demand.status === 'fulfilled' && (
+                          <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            已完结
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* If rejected, show reason */}
+                    {demand.status === 'rejected' && demand.rejectReason && (
+                      <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
+                        <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                        <div>
+                          <strong>驳回理由反馈：</strong>
+                          <span>{demand.rejectReason}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Footer with Actions */}
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs text-slate-500 flex-wrap gap-2">
+                      <div className="flex items-center gap-3">
+                        <span>发布时间：{new Date(demand.createdAt).toLocaleDateString()}</span>
+                        <span>•</span>
+                        <span>有效周期：{demand.deadlineText || '永久有效'}</span>
+                        <span>•</span>
+                        <span className="text-indigo-600 font-bold">{demand.submissionsCount || 0} 个揭榜方案</span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            if (window.confirm('确定撤回并删除此需求吗？奖励的积分将立即全额原路退回您的账户。')) {
+                              onDeleteDemand(demand.id);
+                              onToast('info', '需求已撤销', '奖励积分已退回您的账户');
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 font-semibold flex items-center gap-1 transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>撤销需求 (退积分)</span>
+                        </button>
+
+                        <button
+                          onClick={() => onSelectDemand(demand)}
+                          className="px-3.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold flex items-center gap-1 transition-colors"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>查看详情与揭榜方案</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB: MY STARRED SKILLS */}
       {activeTab === 'starred' && (
         <div className="space-y-4">
           {filteredStarred.length === 0 ? (
@@ -333,7 +551,7 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
         </div>
       )}
 
-      {/* TAB 2: MY SUBMISSIONS & AUDIT PROGRESS TRACKER */}
+      {/* TAB: MY SUBMISSIONS & AUDIT PROGRESS TRACKER */}
       {activeTab === 'submissions' && (
         <div className="space-y-4">
           {filteredSubmissions.length === 0 ? (
@@ -395,7 +613,7 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
                         {isPending && (
                           <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1.5">
                             <Clock className="w-4 h-4 text-amber-600 animate-spin" />
-                            <span>管理员审核中 (排队中)</span>
+                            <span>管理员审核中</span>
                           </span>
                         )}
                         {isRejected && (
@@ -466,7 +684,7 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
                             {isApproved ? '✓' : isRejected ? '✕' : '4'}
                           </div>
                           <div>
-                            <div className="font-bold text-slate-800">4. 超级管理员终审</div>
+                            <div className="font-bold text-slate-800">4. 管理员终审</div>
                             <div className="text-[10px] text-slate-500">
                               {isApproved ? '已审批上线' : isRejected ? '审核驳回' : '等待人工确认'}
                             </div>
@@ -507,7 +725,7 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
         </div>
       )}
 
-      {/* TAB 3: MY LIKED SKILLS */}
+      {/* TAB: MY LIKED SKILLS */}
       {activeTab === 'liked' && (
         <div className="space-y-4">
           {filteredLiked.length === 0 ? (
