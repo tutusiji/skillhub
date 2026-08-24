@@ -15,6 +15,7 @@ import {
   User
 } from 'lucide-react';
 import { UserAccount, UserRole } from '../types';
+import { api, mapApiUser } from '../services/api';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -82,32 +83,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setLoginLoading(true);
 
     try {
-      const res = await fetch('http://localhost:3001/api/v1/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: loginEmail.trim(), password: loginPassword }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || '登录失败，请检查邮箱或密码');
-      }
+      const data = await api.login(loginEmail.trim(), loginPassword);
 
       // 保存 JWT Token 至本地存储
       if (data.token) {
         localStorage.setItem('skillhub_token', data.token);
       }
 
-      const loggedUser: UserAccount = {
-        id: data.user.id,
-        name: data.user.name,
-        email: data.user.email,
-        role: data.user.role as UserRole,
-        avatar: data.user.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-        department: data.user.department,
-        joinedAt: new Date().toISOString().split('T')[0],
-        points: data.user.points || 10000,
-      };
+      const loggedUser: UserAccount = mapApiUser(data.user);
 
       if (onCustomLogin) onCustomLogin(loggedUser);
       else if (onLogin) onLogin(loggedUser);
@@ -130,37 +113,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setRegLoading(true);
 
     try {
-      const res = await fetch('http://localhost:3001/api/v1/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: regName.trim(),
-          email: regEmail.trim(),
-          password: regPassword,
-          department: regDept.trim(),
-          role: regRole,
-        }),
+      const data = await api.register({
+        name: regName.trim(),
+        email: regEmail.trim(),
+        password: regPassword,
+        department: regDept.trim(),
+        role: regRole,
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || '注册失败，请检查输入或更换邮箱');
-      }
 
       if (data.token) {
         localStorage.setItem('skillhub_token', data.token);
       }
 
-      const newUser: UserAccount = {
-        id: data.user.id,
-        name: data.user.name,
-        email: data.user.email,
-        role: data.user.role as UserRole,
-        avatar: data.user.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-        department: data.user.department,
-        joinedAt: new Date().toISOString().split('T')[0],
-        points: data.user.points || 10000,
-      };
+      const newUser: UserAccount = mapApiUser(data.user);
 
       setRegSuccessMsg('注册成功！已自动完成企业身份登录');
       setTimeout(() => {

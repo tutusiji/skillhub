@@ -38,6 +38,7 @@ import { BackToTop } from './components/BackToTop';
 import { ToastContainer } from './components/Toast';
 import { downloadSkillAsZip } from './utils/zipHelper';
 import { executeDualEngineAudit } from './utils/auditRunner';
+import { api, mapApiSkill, mapApiUser, mapAuditRule, syncToBackend } from './services/api';
 
 export default function App() {
   // Users state with LocalStorage persistence
@@ -99,6 +100,9 @@ export default function App() {
     }
     return null; // Guest mode by default
   });
+
+  // Backend integration status (null = checking, false = offline demo fallback)
+  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
 
   // Save current user to LocalStorage
   useEffect(() => {
@@ -261,6 +265,76 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
+  // Bootstrap read-only enterprise data from the NestJS backend. The local mock data
+  // remains an explicit offline fallback so the demo still works without server setup.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const [skillsResult, usersResult, rulesResult] = await Promise.allSettled([
+        api.listSkills(),
+        api.listUsers(),
+        api.listAuditRules(),
+      ]);
+
+      if (cancelled) return;
+
+      if (skillsResult.status === 'fulfilled') {
+        setSkills(skillsResult.value.map(mapApiSkill));
+        setBackendOnline(true);
+      }
+      if (usersResult.status === 'fulfilled') {
+        setAllUsers(usersResult.value.map(mapApiUser));
+      }
+      if (rulesResult.status === 'fulfilled') {
+        setRules(rulesResult.value.map(mapAuditRule));
+      }
+
+      if (
+        skillsResult.status === 'rejected' &&
+        usersResult.status === 'rejected' &&
+        rulesResult.status === 'rejected'
+      ) {
+        setBackendOnline(false);
+        console.warn('SkillHub backend unavailable; using offline demo data.', skillsResult.reason);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Revalidate a persisted JWT on startup and refresh the profile from the backend.
+  useEffect(() => {
+    const token = localStorage.getItem('skillhub_token');
+    if (!token || !currentUser) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const profile = await api.profile();
+        if (!cancelled) {
+          setCurrentUser(prev => ({
+            ...mapApiUser(profile),
+            avatar: profile.avatar || prev?.avatar || '',
+            joinedAt: prev?.joinedAt || new Date().toISOString().split('T')[0],
+            points: profile.points || prev?.points || 10000,
+            title: prev?.title,
+          }));
+        }
+      } catch {
+        // Keep the cached demo identity if the server is temporarily unavailable.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Auth Guard Helper
   const requireAuth = (actionName: string): boolean => {
     if (!currentUser) {
@@ -282,6 +356,7 @@ export default function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('skillhub_user');
+    localStorage.removeItem('skillhub_token');
     if (currentTab === 'audit' || currentTab === 'rules' || currentTab === 'settings' || currentTab === 'personal') {
       setCurrentTab('market');
     }
@@ -303,10 +378,13 @@ export default function App() {
     if (!requireAuth('收藏技能')) {
       return false;
     }
+    // 乐观更新本地计数，同时异步上报后端持久化收藏数
+    let starDelta = 0;
     setSkills(prev =>
       prev.map(s => {
         if (s.id === skillId) {
           const nextStarred = !s.isStarred;
+          starDelta = nextStarred ? 1 : -1;
           const stars = nextStarred ? s.stars + 1 : Math.max(0, s.stars - 1);
           if (nextStarred) {
             addToast('success', '已加入收藏', `已将 ${s.name} 收藏至您的个人中心`);
@@ -318,6 +396,12 @@ export default function App() {
         return s;
       })
     );
+    if (starDelta !== 0) {
+      void syncToBackend(
+        () => api.incrementSkillMetric(skillId, 'stars', starDelta),
+        '同步收藏计数'
+      );
+    }
     if (selectedSkill && selectedSkill.id === skillId) {
       setSelectedSkill(prev => prev ? {
         ...prev,
@@ -332,10 +416,13 @@ export default function App() {
     if (!requireAuth('点赞技能')) {
       return false;
     }
+    // 乐观更新本地点赞数，同时异步上报后端持久化
+    let likeDelta = 0;
     setSkills(prev =>
       prev.map(s => {
         if (s.id === skillId) {
           const nextLiked = !s.isLiked;
+          likeDelta = nextLiked ? 1 : -1;
           const likes = nextLiked ? s.likes + 1 : Math.max(0, s.likes - 1);
           if (nextLiked) {
             addToast('success', '点赞成功', `感谢您对 ${s.name} 的认可与支持！`);
@@ -345,6 +432,12 @@ export default function App() {
         return s;
       })
     );
+    if (likeDelta !== 0) {
+      void syncToBackend(
+        () => api.incrementSkillMetric(skillId, 'likes', likeDelta),
+        '同步点赞计数'
+      );
+    }
     if (selectedSkill && selectedSkill.id === skillId) {
       setSelectedSkill(prev => prev ? {
         ...prev,
@@ -361,9 +454,13 @@ export default function App() {
       addToast('info', '正在打包源码', `正在生成 ${skill.slug} 的 ZIP 文件结构...`);
       await downloadSkillAsZip(skill.name, skill.slug, skill.fileTree);
       
-      // Increment download counter
+      // 累加下载计数并同步至后端统计
       setSkills(prev =>
         prev.map(s => (s.id === skill.id ? { ...s, downloads: s.downloads + 1 } : s))
+      );
+      void syncToBackend(
+        () => api.incrementSkillMetric(skill.id, 'downloads', 1),
+        '同步下载计数'
       );
       if (selectedSkill && selectedSkill.id === skill.id) {
         setSelectedSkill(prev => prev ? { ...prev, downloads: prev.downloads + 1 } : null);
@@ -401,10 +498,55 @@ export default function App() {
     }
   };
 
-  // Upload new skill handler (Guarded)
-  const handleCreateSkill = (newSkill: SkillItem) => {
+  // Upload new skill handler (Guarded) —— 提交后端入库并触发服务端双引擎风控复检
+  const handleCreateSkill = async (newSkill: SkillItem) => {
+    // 1. 乐观插入本地列表，用户立即可在个人中心看到提交记录
     setSkills(prev => [newSkill, ...prev]);
     setCurrentTab('personal');
+
+    // 2. 提交后端持久化；服务端扫描通过会自动发布至 Git 市场
+    try {
+      const created = await api.createSkill({
+        name: newSkill.name,
+        slug: newSkill.slug,
+        category: newSkill.category,
+        description: newSkill.description,
+        author: newSkill.author.name,
+        department: newSkill.author.department,
+        avatar: newSkill.author.avatar,
+        version: newSkill.version,
+        permissions: newSkill.permissions,
+        clients: newSkill.clients,
+        tags: newSkill.tags,
+        readme: newSkill.readme,
+        fileTree: newSkill.fileTree,
+      });
+
+      // 3. 用后端返回的权威记录（含真实 ID 与服务端扫描分）替换本地临时记录
+      const mapped = mapApiSkill(created);
+      setSkills(prev => prev.map(s => (s.id === newSkill.id ? mapped : s)));
+
+      if (mapped.status === 'approved') {
+        addToast(
+          'success',
+          '技能已直接上架',
+          `${mapped.name} 通过服务端风控复检 (${mapped.auditResults.score} 分)，已发布至 Git 市场`
+        );
+      } else {
+        addToast(
+          'info',
+          '已提交审核',
+          `${mapped.name} 服务端复检得分 ${mapped.auditResults.score} 分，等待管理员人工审核`
+        );
+      }
+    } catch (error) {
+      // 后端不可用时保留本地记录，标注为离线草稿，避免用户填写内容丢失
+      addToast(
+        'warning',
+        '已保存为本地草稿',
+        `后端未接收该提交（${(error as Error).message}），恢复连接后请重新提交`
+      );
+    }
   };
 
   // ==========================================
@@ -424,6 +566,12 @@ export default function App() {
 
     setCurrentUser(updatedUser);
     setAllUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
+
+    // 悬赏积分扣减同步至后端账户，保证跨端余额一致
+    void syncToBackend(
+      () => api.adjustUserPoints(currentUser.id, -pointsCost),
+      '扣减悬赏积分'
+    );
 
     const newDemand: SkillDemand = {
       ...newDemandData,
@@ -493,6 +641,12 @@ export default function App() {
       setCurrentUser(prev => prev ? { ...prev, points: (prev.points ?? 10000) + targetDemand.bountyPoints } : null);
     }
 
+    // 驳回需求时退还悬赏积分，同步至后端账户
+    void syncToBackend(
+      () => api.adjustUserPoints(authorId, targetDemand.bountyPoints),
+      '退还悬赏积分(驳回)'
+    );
+
     setDemands(prev =>
       prev.map(d => {
         if (d.id === demandId) {
@@ -547,6 +701,12 @@ export default function App() {
       if (currentUser?.id === authorId) {
         setCurrentUser(prev => prev ? { ...prev, points: (prev.points ?? 10000) + targetDemand.bountyPoints } : null);
       }
+
+      // 删除未交付需求时退还悬赏积分，同步至后端账户
+      void syncToBackend(
+        () => api.adjustUserPoints(authorId, targetDemand.bountyPoints),
+        '退还悬赏积分(删除)'
+      );
     }
 
     setDemands(prev => prev.filter(d => d.id !== demandId));
@@ -603,116 +763,197 @@ export default function App() {
   // ==========================================
   // SUPER ADMIN USER PROMOTION & PERMISSIONS
   // ==========================================
-  const handleUpdateUserRole = (userId: string, newRole: UserRole) => {
+  const handleUpdateUserRole = async (userId: string, newRole: UserRole) => {
     if (!currentUser || currentUser.role !== 'super_admin') {
       addToast('error', '越权操作', '仅超级管理员有权分配或调整管理员权限！');
       return;
     }
 
+    const snapshot = allUsers;
+    const previousRole = allUsers.find(u => u.id === userId)?.role;
+
+    // 乐观更新组织成员列表
     setAllUsers(prev =>
-      prev.map(u => {
-        if (u.id === userId) {
-          return { ...u, role: newRole };
-        }
-        return u;
-      })
+      prev.map(u => (u.id === userId ? { ...u, role: newRole } : u))
     );
 
     // If current logged-in user is updated
     if (currentUser.id === userId) {
       setCurrentUser(prev => prev ? { ...prev, role: newRole } : null);
     }
-  };
 
-  // Admin audit handlers
-  const handleApproveSkill = (id: string, feedback?: string) => {
-    if (!currentUser) return;
-    setSkills(prev =>
-      prev.map(s => {
-        if (s.id === id) {
-          return {
-            ...s,
-            status: 'approved',
-            auditResults: {
-              ...s.auditResults,
-              overallStatus: 'passed',
-              reviewedBy: currentUser.name,
-              reviewedAt: new Date().toISOString(),
-              adminFeedback: feedback || '审核通过，准予在内网市场公开。'
-            }
-          };
-        }
-        return s;
-      })
-    );
-  };
-
-  const handleRejectSkill = (id: string, feedback: string) => {
-    if (!currentUser) return;
-    setSkills(prev =>
-      prev.map(s => {
-        if (s.id === id) {
-          return {
-            ...s,
-            status: 'rejected',
-            auditResults: {
-              ...s.auditResults,
-              overallStatus: 'failed',
-              reviewedBy: currentUser.name,
-              reviewedAt: new Date().toISOString(),
-              adminFeedback: feedback
-            }
-          };
-        }
-        return s;
-      })
-    );
-  };
-
-  const handleDelistSkill = (id: string) => {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'super_admin')) return;
-    setSkills(prev =>
-      prev.map(s => {
-        if (s.id === id) {
-          return {
-            ...s,
-            status: 'offline' as const,
-            updatedAt: new Date().toISOString()
-          };
-        }
-        return s;
-      })
-    );
-    if (selectedSkill && selectedSkill.id === id) {
-      setSelectedSkill(prev => prev ? { ...prev, status: 'offline' } : null);
+    // 持久化角色变更到后端，失败则回滚本地状态
+    try {
+      const updated = await api.updateUserRole(userId, newRole);
+      const mapped = mapApiUser(updated);
+      setAllUsers(prev =>
+        prev.map(u => (u.id === userId ? { ...u, role: mapped.role } : u))
+      );
+      addToast('success', '权限已更新', `${mapped.name} 的角色已变更为 ${newRole}`);
+    } catch (error) {
+      setAllUsers(snapshot);
+      if (currentUser.id === userId && previousRole) {
+        setCurrentUser(prev => prev ? { ...prev, role: previousRole } : null);
+      }
+      addToast('error', '权限更新失败', (error as Error).message);
     }
   };
 
-  const handleRelistSkill = (id: string) => {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'super_admin')) return;
+  /**
+   * 判断当前用户是否具备管理员审核权限
+   */
+  const isPrivilegedUser = (): boolean =>
+    !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin');
+
+  /**
+   * 以后端返回结果为准回写单个技能，保留前端本地交互态 (点赞/收藏标记)
+   * @param updated 后端返回的技能实体
+   */
+  const mergeSkillFromServer = (updated: SkillItem) => {
     setSkills(prev =>
-      prev.map(s => {
-        if (s.id === id) {
-          return {
-            ...s,
-            status: 'approved' as const,
-            updatedAt: new Date().toISOString()
-          };
-        }
-        return s;
-      })
+      prev.map(s =>
+        s.id === updated.id
+          ? { ...updated, isLiked: s.isLiked, isStarred: s.isStarred }
+          : s
+      )
     );
-    if (selectedSkill && selectedSkill.id === id) {
-      setSelectedSkill(prev => prev ? { ...prev, status: 'approved' } : null);
+    setSelectedSkill(prev =>
+      prev && prev.id === updated.id
+        ? { ...updated, isLiked: prev.isLiked, isStarred: prev.isStarred }
+        : prev
+    );
+  };
+
+  // Admin audit handlers —— 审核动作强依赖后端 (会触发 Git 市场同步)，失败需回滚
+  const handleApproveSkill = async (id: string, feedback?: string) => {
+    if (!currentUser) return;
+    const snapshot = skills;
+
+    // 1. 乐观更新，界面即时反馈
+    setSkills(prev =>
+      prev.map(s =>
+        s.id === id
+          ? {
+              ...s,
+              status: 'approved' as const,
+              auditResults: {
+                ...s.auditResults,
+                overallStatus: 'passed' as const,
+                reviewedBy: currentUser.name,
+                reviewedAt: new Date().toISOString(),
+                adminFeedback: feedback || '审核通过，准予在内网市场公开。',
+              },
+            }
+          : s
+      )
+    );
+
+    // 2. 请求后端落库并发布至 Git 市场
+    try {
+      const updated = await api.approveSkill(id, feedback);
+      mergeSkillFromServer(mapApiSkill(updated));
+      addToast('success', '审核通过', `${updated.name} 已发布至 Git 市场，可通过 /plugin install 安装`);
+    } catch (error) {
+      setSkills(snapshot);
+      addToast('error', '审核失败', (error as Error).message);
     }
   };
 
-  const handleDeleteSkill = (id: string) => {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'super_admin')) return;
+  const handleRejectSkill = async (id: string, feedback: string) => {
+    if (!currentUser) return;
+    const snapshot = skills;
+
+    setSkills(prev =>
+      prev.map(s =>
+        s.id === id
+          ? {
+              ...s,
+              status: 'rejected' as const,
+              auditResults: {
+                ...s.auditResults,
+                overallStatus: 'failed' as const,
+                reviewedBy: currentUser.name,
+                reviewedAt: new Date().toISOString(),
+                adminFeedback: feedback,
+              },
+            }
+          : s
+      )
+    );
+
+    try {
+      const updated = await api.rejectSkill(id, feedback);
+      mergeSkillFromServer(mapApiSkill(updated));
+      addToast('info', '已驳回', `已通知开发者整改：${updated.name}`);
+    } catch (error) {
+      setSkills(snapshot);
+      addToast('error', '驳回失败', (error as Error).message);
+    }
+  };
+
+  const handleDelistSkill = async (id: string) => {
+    if (!isPrivilegedUser()) return;
+    const snapshot = skills;
+
+    setSkills(prev =>
+      prev.map(s =>
+        s.id === id
+          ? { ...s, status: 'offline' as const, updatedAt: new Date().toISOString() }
+          : s
+      )
+    );
+    setSelectedSkill(prev => (prev && prev.id === id ? { ...prev, status: 'offline' } : prev));
+
+    try {
+      const updated = await api.delistSkill(id);
+      mergeSkillFromServer(mapApiSkill(updated));
+      addToast('warning', '技能已下架', `${updated.name} 已从 Git 市场索引移除`);
+    } catch (error) {
+      setSkills(snapshot);
+      addToast('error', '下架失败', (error as Error).message);
+    }
+  };
+
+  const handleRelistSkill = async (id: string) => {
+    if (!isPrivilegedUser()) return;
+    const snapshot = skills;
+
+    setSkills(prev =>
+      prev.map(s =>
+        s.id === id
+          ? { ...s, status: 'approved' as const, updatedAt: new Date().toISOString() }
+          : s
+      )
+    );
+    setSelectedSkill(prev => (prev && prev.id === id ? { ...prev, status: 'approved' } : prev));
+
+    try {
+      const updated = await api.relistSkill(id);
+      mergeSkillFromServer(mapApiSkill(updated));
+      addToast('success', '技能已恢复上线', `${updated.name} 已重新同步至 Git 市场`);
+    } catch (error) {
+      setSkills(snapshot);
+      addToast('error', '恢复上线失败', (error as Error).message);
+    }
+  };
+
+  const handleDeleteSkill = async (id: string) => {
+    if (!isPrivilegedUser()) return;
+    const snapshot = skills;
+    const target = skills.find(s => s.id === id);
+
     setSkills(prev => prev.filter(s => s.id !== id));
     if (selectedSkill && selectedSkill.id === id) {
       setSelectedSkill(null);
       setCurrentTab('market');
+    }
+
+    try {
+      await api.deleteSkill(id);
+      addToast('success', '技能已删除', `${target?.name || id} 已彻底移除并重建市场索引`);
+    } catch (error) {
+      setSkills(snapshot);
+      addToast('error', '删除失败', (error as Error).message);
     }
   };
 
@@ -720,10 +961,17 @@ export default function App() {
     setSkills(prev =>
       prev.map(s => (s.id === id ? { ...s, auditResults: summary } : s))
     );
+    // 体检得分回写后端，保证多端一致
+    void syncToBackend(
+      () => api.updateSkillAuditScore(id, summary.score),
+      '同步体检得分'
+    );
   };
 
-  // Rule management handlers
-  const handleSaveRule = (rule: AuditRule) => {
+  // Rule management handlers —— 规则变更需持久化到后端风控引擎
+  const handleSaveRule = async (rule: AuditRule) => {
+    const snapshot = rules;
+
     setRules(prev => {
       const exists = prev.some(r => r.id === rule.id);
       if (exists) {
@@ -731,17 +979,48 @@ export default function App() {
       }
       return [...prev, rule];
     });
+
+    try {
+      const saved = await api.saveAuditRule(rule);
+      const mapped = mapAuditRule(saved);
+      // 后端可能重新分配了规则 ID (新建场景)，需按新旧 ID 一并覆盖
+      setRules(prev => {
+        const merged = prev.map(r => (r.id === rule.id || r.id === mapped.id ? mapped : r));
+        return merged.some(r => r.id === mapped.id) ? merged : [...merged, mapped];
+      });
+      addToast('success', '规则已保存', `${mapped.name} 已生效于双引擎风控`);
+    } catch (error) {
+      setRules(snapshot);
+      addToast('error', '规则保存失败', (error as Error).message);
+    }
   };
 
-  const handleDeleteRule = (id: string) => {
+  const handleDeleteRule = async (id: string) => {
+    const snapshot = rules;
     setRules(prev => prev.filter(r => r.id !== id));
-    addToast('info', '规则已删除', '已将该项规则从检测引擎中移除');
+
+    try {
+      await api.deleteAuditRule(id);
+      addToast('info', '规则已删除', '已将该项规则从检测引擎中移除');
+    } catch (error) {
+      setRules(snapshot);
+      addToast('error', '规则删除失败', (error as Error).message);
+    }
   };
 
-  const handleToggleRule = (id: string) => {
+  const handleToggleRule = async (id: string) => {
+    const snapshot = rules;
     setRules(prev =>
       prev.map(r => (r.id === id ? { ...r, isEnabled: !r.isEnabled } : r))
     );
+
+    try {
+      const updated = await api.toggleAuditRule(id);
+      setRules(prev => prev.map(r => (r.id === id ? mapAuditRule(updated) : r)));
+    } catch (error) {
+      setRules(snapshot);
+      addToast('error', '规则状态切换失败', (error as Error).message);
+    }
   };
 
   // Feedback handler (Guarded)
@@ -839,6 +1118,7 @@ export default function App() {
         starredCount={starredCount}
         mySubmissionsCount={mySubmissionsCount}
         isSuperAdmin={isSuperAdmin}
+        backendOnline={backendOnline}
       />
 
       {/* Main Content Area */}

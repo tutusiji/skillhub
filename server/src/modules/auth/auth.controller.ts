@@ -1,10 +1,13 @@
 import {
   Controller,
   Post,
+  Patch,
   Get,
   Body,
+  Param,
   Req,
   UnauthorizedException,
+  ForbiddenException,
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
@@ -69,5 +72,61 @@ export class AuthController {
   @Get('users')
   async getAllUsers(): Promise<UserSession[]> {
     return this.authService.getAllUsers();
+  }
+
+  /**
+   * 超级管理员变更指定用户的角色权限 (仅 admin / super_admin 可操作)
+   * @param id 目标用户 ID
+   * @param body 包含新角色的请求体
+   */
+  @Patch('users/:id/role')
+  async updateUserRole(
+    @Param('id') id: string,
+    @Body() body: { role: string },
+    @Req() req: Request,
+  ): Promise<UserSession> {
+    const operator = this.resolveSession(req);
+    if (operator.role !== 'admin' && operator.role !== 'super_admin') {
+      throw new ForbiddenException('仅管理员可变更组织成员角色权限');
+    }
+    return this.authService.updateUserRole(id, body?.role);
+  }
+
+  /**
+   * 调整指定用户的悬赏积分余额 (需求发布扣分 / 交付奖励加分)
+   * @param id 目标用户 ID
+   * @param body 积分增量
+   */
+  @Patch('users/:id/points')
+  async adjustUserPoints(
+    @Param('id') id: string,
+    @Body() body: { delta: number },
+    @Req() req: Request,
+  ): Promise<UserSession> {
+    const operator = this.resolveSession(req);
+    // 普通用户仅可扣减自己的积分，管理员可调整任意成员
+    const isPrivileged =
+      operator.role === 'admin' || operator.role === 'super_admin';
+    if (!isPrivileged && operator.id !== id) {
+      throw new ForbiddenException('无权调整其他成员的积分余额');
+    }
+    return this.authService.adjustUserPoints(id, body?.delta);
+  }
+
+  /**
+   * 从请求头中解析并校验当前操作者身份会话
+   * @param req HTTP 请求对象
+   */
+  private resolveSession(req: Request): UserSession {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : (req.query?.token as string);
+
+    const session = token ? this.authService.validateToken(token) : null;
+    if (!session) {
+      throw new UnauthorizedException('请先登录后再执行该操作');
+    }
+    return session;
   }
 }

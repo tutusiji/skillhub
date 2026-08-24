@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AuditRuleEntity } from '../../database/entities/audit-rule.entity';
@@ -172,6 +172,24 @@ export class AuditService implements OnModuleInit {
   }
 
   /**
+   * 删除自定义风控规则 (系统内置预设规则受保护，不允许删除)
+   * @param id 规则 ID
+   */
+  async deleteRule(id: string): Promise<{ success: boolean; id: string }> {
+    const rule = await this.ruleRepository.findOne({ where: { id } });
+    if (!rule) {
+      throw new NotFoundException('未找到对应风控规则');
+    }
+    if (rule.isPreset) {
+      throw new BadRequestException(
+        '系统内置预设规则不可删除，如需停用请切换启用状态',
+      );
+    }
+    await this.ruleRepository.remove(rule);
+    return { success: true, id };
+  }
+
+  /**
    * 运行双引擎实时安全体检扫描并持久化体检快照
    * @param payload 待扫描的代码或 Prompt 文本
    * @param skillId 可选关联的技能 ID
@@ -208,7 +226,10 @@ export class AuditService implements OnModuleInit {
     }
 
     // 2. 引擎 2：LLM 语义研判
-    const llmVerdict = this.evaluateSemanticRisk(payload, regexHits);
+    const llmRules = await this.ruleRepository.find({
+      where: { type: 'llm', isEnabled: true },
+    });
+    const llmVerdict = this.evaluateSemanticRisk(payload, regexHits, llmRules);
 
     // 3. 计算综合风险分值与放行判定
     let score = 100;
@@ -265,8 +286,63 @@ export class AuditService implements OnModuleInit {
   private evaluateSemanticRisk(
     code: string,
     regexHits: RegexHit[],
+    llmRules: AuditRuleEntity[] = [],
   ): LLMVerdict {
     const hasCriticalRegex = regexHits.some((h) => h.severity === 'critical');
+    const lower = code.toLowerCase();
+
+    // 语义特征库：每条 LLM 规则对应一组启发式关键特征
+    const semanticSignatures: Record<
+      string,
+      { keywords: string[]; label: string }
+    > = {
+      'rule-llm-1': {
+        label: 'Prompt 越狱与指令注入',
+        keywords: [
+          'ignore previous',
+          'ignore all previous',
+          'disregard previous',
+          'disregard the above',
+          'forget your instructions',
+          'you are now',
+          'system prompt',
+          'reveal your prompt',
+          'jailbreak',
+          '忽略以上指令',
+          '忽略之前的指令',
+          '忘记你的设定',
+        ],
+      },
+      'rule-llm-2': {
+        label: '隐蔽数据外发与内网嗅探',
+        keywords: [
+          'exfiltrate',
+          'webhook.site',
+          'requestbin',
+          'ngrok.io',
+          'base64',
+          'atob(',
+          'btoa(',
+          'curl -x post',
+          'dns log',
+          'child_process',
+          'eval(',
+        ],
+      },
+    };
+
+    // 逐条评估启用中的 LLM 规则，收集命中项
+    const semanticHits: Array<{ rule: AuditRuleEntity; matched: string[] }> = [];
+    for (const rule of llmRules) {
+      const signature = semanticSignatures[rule.id];
+      if (!signature) continue;
+      const matched = signature.keywords.filter((kw) => lower.includes(kw));
+      if (matched.length > 0) {
+        semanticHits.push({ rule, matched });
+      }
+    }
+
+    // 环境变量 + 外发网络请求的组合可疑模式
     const isSuspicious =
       code.includes('process.env') &&
       (code.includes('fetch(') ||
@@ -284,6 +360,34 @@ export class AuditService implements OnModuleInit {
           '存在违规越权访问或明文敏感凭据泄露风险。',
         ],
         suggestions: ['立即移除代码中硬编码的 Token，改用标准环境变量传入。'],
+      };
+    }
+
+    // 语义引擎命中：按最高风险级别裁定分数与放行结论
+    if (semanticHits.length > 0) {
+      const hasCritical = semanticHits.some(
+        (h) => h.rule.severity === 'critical',
+      );
+      const hasHigh = semanticHits.some((h) => h.rule.severity === 'high');
+      const score = hasCritical ? 35 : hasHigh ? 58 : 72;
+
+      return {
+        score,
+        confidence: 0.91,
+        status: hasCritical ? 'failed' : 'warning',
+        summary: `LLM 语义引擎命中 ${semanticHits.length} 项高危语义特征：${semanticHits
+          .map((h) => semanticSignatures[h.rule.id].label)
+          .join('、')}。`,
+        reasoning: semanticHits.map(
+          (h) =>
+            `[${h.rule.severity}] ${h.rule.name} —— 命中特征: ${h.matched
+              .slice(0, 3)
+              .join(', ')}`,
+        ),
+        suggestions: [
+          '移除内容中的越狱指令或隐蔽外发逻辑后重新提交体检；',
+          '如为业务必需能力，请在技能权限声明中显式报备并走人工审核。',
+        ],
       };
     }
 

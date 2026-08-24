@@ -59,16 +59,18 @@ cd server && pnpm install
 ### 2. 本地启动开发环境
 
 ```bash
-# 启动前端开发服务器 (端口 3000)
+# 启动前端开发服务器 (端口 7001)
 pnpm run dev
 
 # 启动 NestJS 后端服务 (端口 3001)
 cd server && pnpm run start:dev
 ```
 
-访问前端页面：[http://localhost:3000](http://localhost:3000)
+访问前端页面：[http://localhost:7001](http://localhost:7001)
 后端 API 根地址：[http://localhost:3001](http://localhost:3001)
 Git 市场地址：`http://localhost:3001/skillhub.git`
+
+前端默认连接 `http://localhost:3001`，可通过根目录 `.env` 的 `VITE_API_BASE_URL` 覆盖。后端不可用时，前端会自动回退到本地演示数据。
 
 ---
 

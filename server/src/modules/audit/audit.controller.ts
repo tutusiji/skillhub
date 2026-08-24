@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param } from '@nestjs/common';
 import { AuditService } from './audit.service';
 import { AuditRuleEntity } from '../../database/entities/audit-rule.entity';
 
@@ -42,5 +42,16 @@ export class AuditController {
   @Post('sandbox-scan')
   async runSandboxScan(@Body() body: { payload: string; skillId?: string }) {
     return this.auditService.runDualEngineScan(body.payload || '', body.skillId);
+  }
+
+  /**
+   * 删除自定义风控规则 (内置预设规则受保护)
+   * @param id 规则 ID
+   */
+  @Delete('rules/:id')
+  async deleteRule(
+    @Param('id') id: string,
+  ): Promise<{ success: boolean; id: string }> {
+    return this.auditService.deleteRule(id);
   }
 }

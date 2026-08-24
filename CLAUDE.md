@@ -9,14 +9,14 @@ SkillHub — an enterprise AI skill/plugin marketplace for private deployments. 
 - **Frontend SPA** (`src/`) — React 19 + Vite + Tailwind v4. This is the primary demo surface.
 - **NestJS backend** (`server/`) — an enterprise backend; both `.` and `server` are members of the pnpm workspace (`pnpm-workspace.yaml`).
 
-The two are **not wired together**: the frontend makes zero API calls to the backend.
+The two are **partially wired**: the frontend boots read-only skills/users/rules from the backend and authenticates with backend JWT APIs, while most write operations still update local React state/localStorage only.
 
 ## Commands
 
 ### Frontend (repo root)
 ```bash
 pnpm install          # installs root + server/ in one go (both are workspace members)
-pnpm run dev          # Vite dev server on :3000
+pnpm run dev          # Vite dev server on :7001
 pnpm run build        # vite build
 pnpm run lint         # tsc --noEmit (typecheck — the only "lint")
 pnpm run preview      # preview the built bundle
@@ -34,11 +34,13 @@ There is **no test runner and no test suites** in either app.
 
 ## Architecture
 
-### Frontend: a fully client-side prototype
-- All application state lives in `App.tsx` (React `useState`), seeded from mock data in `src/mock/initialData.ts` and persisted to `localStorage` under `skillhub_*` keys (`skillhub_skills`, `skillhub_rules`, `skillhub_demands`, `skillhub_feedback`, `skillhub_deepseek`, `skillhub_all_users`, `skillhub_user`).
+### Frontend: React SPA with an offline-capable backend client
+- Most application state lives in `App.tsx` (React `useState`), seeded from mock data in `src/mock/initialData.ts` and persisted to `localStorage` under `skillhub_*` keys (`skillhub_skills`, `skillhub_rules`, `skillhub_demands`, `skillhub_feedback`, `skillhub_deepseek`, `skillhub_all_users`, `skillhub_user`). On startup, `src/services/api.ts` attempts to replace skills/users/rules with backend data and keeps mock data as an offline fallback. Set `VITE_API_BASE_URL` to override the default `http://localhost:3001`.
 - There is **no router** — the "pages" (Marketplace, SkillDemandMarket, PersonalCenter, AuditManagement, RuleManagement, AdminSettings) are views switched by state in `App.tsx` and rendered through `<Header>` tabs and modal components.
 - Core entity types are in `src/types/index.ts` (`SkillItem`, `AuditRule`, `SkillDemand`, `UserAccount`, `DeepSeekConfig`, `FileTreeNode`, …). `ExpertDomain` → `src/data/expertDomains.ts` holds the domain taxonomy + badge styling.
 - ZIP download / file-tree creation lives in `src/utils/zipHelper.ts`.
+- **All backend calls go through `src/services/api.ts`** — `apiFetch` injects `Authorization: Bearer <skillhub_token>`, tracks online status, and normalizes errors; `mapApiSkill` / `mapApiUser` / `mapAuditRule` translate server entities into the frontend types. Two write patterns are used: `syncToBackend(task, label)` for fire-and-forget optimistic counters (likes/stars/downloads/points), and `await` + snapshot rollback + toast for authoritative mutations (approve/reject/delist/relist/delete, role changes, rule CRUD).
+- `<Header backendOnline={...}>` renders a status dot: grey/pulsing while probing, green when the backend answered, amber for offline demo-data mode.
 
 ### Backend: NestJS enterprise service
 - **Persistence** is TypeORM via `server/src/database/database.module.ts`: SQLite by default (DB file at `server/storage/skillhub.sqlite`), or PostgreSQL when `DB_TYPE=postgres` / `DATABASE_URL` is set. `synchronize: true` auto-creates tables. Entities: `UserEntity`, `SkillEntity`, `AuditRuleEntity`, `AuditReportEntity`.
@@ -67,4 +69,6 @@ The same concept is implemented separately in both apps, and the two do not shar
 - `@/` import alias resolves to the repo root.
 - **`server/storage/` is runtime data** (the SQLite DB + the git marketplace repo) and is gitignored. Both are regenerated/seeded automatically on server startup (`onModuleInit`), so don't commit or edit files there.
 - The server depends on native builds (`sqlite3`, `pg`, `esbuild`) — `pnpm-workspace.yaml` lists them in `allowBuilds`.
-- The README's architecture diagram is aspirational: it shows a fully integrated front↔back system, but the frontend is still an offline localStorage prototype that never calls the backend. The app is React 19 + Vite (not Remix).
+- **What is backend-backed vs local-only.** Backend-backed: skills/users/rules bootstrap, JWT login/register/profile, skill upload, approve/reject/delist/relist/delete, like/star/download counters, audit-score writeback, user role + points, audit rule save/toggle/delete. Still local-only (`localStorage`): the whole skill-demand workflow, feedback submissions, and DeepSeek configuration. The app is React 19 + Vite (not Remix).
+- **Slug handling lives server-side.** `SkillsService.resolveUniqueSlug` derives an ASCII kebab-case slug from `name` when `slug` is omitted, strips non-ASCII (Chinese names fall back to `skill-<base36>`), and appends `-2`, `-3`, … on collision — plugin directory names and `/plugin install` commands must stay ASCII. `createSkill` rejects a missing `name`/`description` with 400 instead of throwing 500.
+- **Dev-server proxy**: `vite.config.ts` proxies `/api`, `/skillhub.git`, `/market.git`, and `/.claude-plugin` to `BACKEND_TARGET` (default `http://127.0.0.1:3001`) and sets `allowedHosts: true`, so a tunnelled origin serves frontend + backend same-origin. Vite falls through to :7002+ if :7001 is taken.

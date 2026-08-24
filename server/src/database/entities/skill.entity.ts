@@ -93,6 +93,18 @@ export class SkillEntity {
   @Column({ default: 100 })
   auditScore: number;
 
+  /** 审核操作人姓名 (管理员通过/驳回时写入) */
+  @Column({ name: 'reviewed_by', type: 'text', nullable: true })
+  reviewedBy: string;
+
+  /** 审核操作时间 */
+  @Column({ name: 'reviewed_at', type: 'text', nullable: true })
+  reviewedAt: string;
+
+  /** 管理员审核意见与驳回理由 */
+  @Column({ name: 'admin_feedback', type: 'text', nullable: true })
+  adminFeedback: string;
+
   /** 创建时间 */
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

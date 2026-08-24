@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
 import { SkillEntity } from '../../database/entities/skill.entity';
@@ -212,27 +217,101 @@ export class SkillsService implements OnModuleInit {
   }
 
   /**
+   * 递归展平文件树中的文本内容，用于扩大风控扫描覆盖面
+   * @param nodes 文件树节点列表
+   */
+  private flattenFileContents(nodes: FileTreeNode[] = []): string {
+    const chunks: string[] = [];
+    for (const node of nodes) {
+      if (node.content) chunks.push(node.content);
+      if (node.children?.length) {
+        chunks.push(this.flattenFileContents(node.children));
+      }
+    }
+    return chunks.join('\n');
+  }
+
+  /**
+   * 归一化技能 slug 并确保数据库唯一
+   * slug 缺省时基于技能名称派生；若已被占用则追加自增后缀，避免 UNIQUE 约束报 500
+   * @param rawSlug 前端传入的原始 slug (可为空)
+   * @param name 技能名称，用于兜底派生
+   */
+  private async resolveUniqueSlug(
+    rawSlug: string | undefined,
+    name: string,
+  ): Promise<{ cleanSlug: string; fullSlug: string }> {
+    // 1. 归一化：去掉 scope 前缀，仅保留 ASCII 字母数字与连字符
+    //    Git 插件目录名与 /plugin install 命令必须为 ASCII，故中文等字符一律剔除
+    const source = (rawSlug || name || '').trim();
+    let base = source
+      .replace(/^@/, '')
+      .replace(/^skillhub\//, '')
+      .replace(/[\s_/]+/g, '-')
+      .replace(/[^a-zA-Z0-9-]/g, '')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-|-$/g, '')
+      .toLowerCase();
+
+    // 2. 名称为纯中文等无法派生出 ASCII slug 时，使用时间戳兜底
+    if (!base || !/[a-z0-9]/.test(base)) {
+      base = `skill-${Date.now().toString(36)}`;
+    }
+
+    // 3. 冲突检测：同名 slug 已存在时追加自增序号
+    let candidate = base;
+    let suffix = 1;
+    while (
+      (await this.skillRepository.countBy({
+        slug: `@skillhub/${candidate}`,
+      })) > 0
+    ) {
+      suffix += 1;
+      candidate = `${base}-${suffix}`;
+    }
+
+    return { cleanSlug: candidate, fullSlug: `@skillhub/${candidate}` };
+  }
+
+  /**
    * 上传并创建新技能 (持久化入库并根据扫描结果同步 Git)
    * @param payload 技能表单数据
    */
   async createSkill(payload: {
     name: string;
-    slug: string;
+    slug?: string;
     category: any;
     description: string;
     author: string;
     department?: string;
+    avatar?: string;
+    version?: string;
     permissions?: string[];
+    clients?: string[];
+    tags?: string[];
+    readme?: string;
+    fileTree?: FileTreeNode[];
     zipBuffer?: Buffer;
   }): Promise<SkillEntity> {
-    const cleanSlug = payload.slug.replace('@', '').replace('/', '-');
-    const fullSlug = payload.slug.startsWith('@')
-      ? payload.slug
-      : `@skillhub/${cleanSlug}`;
+    if (!payload?.name?.trim()) {
+      throw new BadRequestException('技能名称为必填项');
+    }
+    if (!payload?.description?.trim()) {
+      throw new BadRequestException('技能简介为必填项');
+    }
 
+    // slug 允许省略：由技能名称自动派生，并保证全局唯一 (避免 UNIQUE 约束 500)
+    const { cleanSlug, fullSlug } = await this.resolveUniqueSlug(
+      payload.slug,
+      payload.name,
+    );
+
+    // 文件树优先级：ZIP 解析 > 前端传入的虚拟文件树 > 默认模板
     let fileTree: FileTreeNode[] = [];
     if (payload.zipBuffer) {
       fileTree = await this.parseZipFileTree(payload.zipBuffer);
+    } else if (payload.fileTree?.length) {
+      fileTree = payload.fileTree;
     } else {
       fileTree = [
         {
@@ -243,10 +322,16 @@ export class SkillsService implements OnModuleInit {
       ];
     }
 
-    // 触发双引擎风控扫描
-    const scanResult = await this.auditService.runDualEngineScan(
+    // 触发双引擎风控扫描：将描述、README 与文件内容一并纳入扫描面
+    const scanPayload = [
       payload.description,
-    );
+      payload.readme || '',
+      this.flattenFileContents(fileTree),
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const scanResult = await this.auditService.runDualEngineScan(scanPayload);
 
     const newSkill = this.skillRepository.create({
       id: `skill-${Date.now()}`,
@@ -257,11 +342,16 @@ export class SkillsService implements OnModuleInit {
       author: payload.author,
       department: payload.department || '研发中心',
       avatar:
+        payload.avatar ||
         'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces',
-      version: 'v1.0.0',
+      version: payload.version || 'v1.0.0',
       status: scanResult.status === 'passed' ? 'approved' : 'pending',
-      clients: ['claude', 'cursor', 'mcp'],
-      tags: ['AI技能', payload.category],
+      clients: payload.clients?.length
+        ? payload.clients
+        : ['claude', 'cursor', 'mcp'],
+      tags: payload.tags?.length
+        ? payload.tags
+        : ['AI技能', payload.category],
       downloads: 0,
       likes: 0,
       stars: 0,
@@ -294,11 +384,19 @@ export class SkillsService implements OnModuleInit {
    * 管理员审核通过技能并自动提交发布至 Git 市场
    * @param id 技能 ID
    */
-  async approveSkill(id: string): Promise<SkillEntity> {
+  async approveSkill(
+    id: string,
+    reviewer?: string,
+    feedback?: string,
+  ): Promise<SkillEntity> {
     const skill = await this.skillRepository.findOne({ where: { id } });
     if (!skill) throw new NotFoundException('未找到对应待审核技能');
 
     skill.status = 'approved';
+    skill.reviewedBy = reviewer || '系统管理员';
+    skill.reviewedAt = new Date().toISOString();
+    skill.adminFeedback = feedback || '审核通过，准予在内网市场公开。';
+
     const updated = await this.skillRepository.save(skill);
     await this.gitMarketService.syncApprovedSkillToGit(
       updated,
@@ -306,5 +404,131 @@ export class SkillsService implements OnModuleInit {
       updated.version,
     );
     return updated;
+  }
+
+  /**
+   * 管理员驳回技能上架申请并记录驳回理由
+   * @param id 技能 ID
+   * @param reviewer 审核人姓名
+   * @param feedback 驳回理由 (必填，用于开发者整改)
+   */
+  async rejectSkill(
+    id: string,
+    reviewer?: string,
+    feedback?: string,
+  ): Promise<SkillEntity> {
+    const skill = await this.skillRepository.findOne({ where: { id } });
+    if (!skill) throw new NotFoundException('未找到对应待审核技能');
+
+    skill.status = 'rejected';
+    skill.reviewedBy = reviewer || '系统管理员';
+    skill.reviewedAt = new Date().toISOString();
+    skill.adminFeedback = feedback || '未通过安全合规审查，请修复后重新提交。';
+
+    return this.skillRepository.save(skill);
+  }
+
+  /**
+   * 管理员紧急下架已上线技能 (状态置为 offline，同时从 Git 市场索引移除)
+   * @param id 技能 ID
+   * @param reviewer 操作人姓名
+   * @param reason 下架原因
+   */
+  async delistSkill(
+    id: string,
+    reviewer?: string,
+    reason?: string,
+  ): Promise<SkillEntity> {
+    const skill = await this.skillRepository.findOne({ where: { id } });
+    if (!skill) throw new NotFoundException('未找到对应技能');
+
+    skill.status = 'offline';
+    skill.reviewedBy = reviewer || '系统管理员';
+    skill.reviewedAt = new Date().toISOString();
+    skill.adminFeedback = reason || '管理员已将该技能临时下架。';
+
+    const updated = await this.skillRepository.save(skill);
+    // 下架后需重建 Git 市场索引，避免客户端仍能安装
+    await this.rebuildGitMarketIndex();
+    return updated;
+  }
+
+  /**
+   * 管理员恢复已下架技能上线，并重新同步至 Git 市场
+   * @param id 技能 ID
+   * @param reviewer 操作人姓名
+   */
+  async relistSkill(id: string, reviewer?: string): Promise<SkillEntity> {
+    const skill = await this.skillRepository.findOne({ where: { id } });
+    if (!skill) throw new NotFoundException('未找到对应技能');
+
+    skill.status = 'approved';
+    skill.reviewedBy = reviewer || '系统管理员';
+    skill.reviewedAt = new Date().toISOString();
+    skill.adminFeedback = '技能已恢复上线。';
+
+    const updated = await this.skillRepository.save(skill);
+    await this.gitMarketService.syncApprovedSkillToGit(
+      updated,
+      undefined,
+      updated.version,
+    );
+    return updated;
+  }
+
+  /**
+   * 管理员彻底删除技能记录并刷新 Git 市场索引
+   * @param id 技能 ID
+   */
+  async deleteSkill(id: string): Promise<{ success: boolean; id: string }> {
+    const skill = await this.skillRepository.findOne({ where: { id } });
+    if (!skill) throw new NotFoundException('未找到对应技能');
+
+    await this.skillRepository.remove(skill);
+    await this.rebuildGitMarketIndex();
+    return { success: true, id };
+  }
+
+  /**
+   * 重建 Git 市场插件索引：仅保留当前处于 approved 状态的技能
+   */
+  private async rebuildGitMarketIndex(): Promise<void> {
+    const approved = await this.skillRepository.find({
+      where: { status: 'approved' },
+      order: { createdAt: 'DESC' },
+    });
+    await this.gitMarketService.rebuildMarketplaceIndex(approved);
+  }
+
+  /**
+   * 累加技能社交互动计数 (点赞/收藏/下载)，返回最新计数快照
+   * @param id 技能 ID
+   * @param metric 计数字段 ('likes' | 'stars' | 'downloads')
+   * @param delta 增量 (+1 表示点赞，-1 表示取消)
+   */
+  async incrementMetric(
+    id: string,
+    metric: 'likes' | 'stars' | 'downloads',
+    delta: number,
+  ): Promise<SkillEntity> {
+    const skill = await this.skillRepository.findOne({ where: { id } });
+    if (!skill) throw new NotFoundException('未找到对应技能');
+
+    const step = delta >= 0 ? 1 : -1;
+    skill[metric] = Math.max(0, (skill[metric] ?? 0) + step);
+    return this.skillRepository.save(skill);
+  }
+
+  /**
+   * 回写双引擎体检得分与结论到技能记录 (供前端重新体检后同步)
+   * @param id 技能 ID
+   * @param score 最新综合得分
+   */
+  async updateAuditScore(id: string, score: number): Promise<SkillEntity> {
+    const skill = await this.skillRepository.findOne({ where: { id } });
+    if (!skill) throw new NotFoundException('未找到对应技能');
+
+    skill.auditScore = Math.max(0, Math.min(100, Math.round(score)));
+    return this.skillRepository.save(skill);
   }
 }

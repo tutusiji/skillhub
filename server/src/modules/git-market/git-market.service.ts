@@ -240,4 +240,83 @@ export class GitMarketService implements OnModuleInit {
     );
     return commitSha;
   }
+
+  /**
+   * 按当前已上线技能全量重建市场索引 (用于下架/删除后剔除插件条目)
+   * 会移除 marketplace.json 中多余条目，并删除对应插件源码目录后提交 Commit
+   * @param approvedSkills 当前处于 approved 状态的技能清单
+   */
+  async rebuildMarketplaceIndex(
+    approvedSkills: Array<{
+      name: string;
+      slug: string;
+      description: string;
+      category?: string;
+      author?: string;
+      version?: string;
+    }>,
+  ): Promise<string> {
+    await this.ensureRepoInitialized();
+
+    const manifest = this.getMarketplaceManifest();
+    const validSlugs = new Set<string>();
+
+    // 1. 依据在线技能重建 plugins 数组
+    manifest.plugins = approvedSkills.map((skill) => {
+      const cleanSlug = skill.slug.replace('@', '').replace('/', '-');
+      validSlugs.add(cleanSlug);
+      return {
+        name: cleanSlug,
+        description: skill.description,
+        version: skill.version || 'v1.0.0',
+        source: `./plugins/${cleanSlug}`,
+        category: skill.category,
+        author: skill.author,
+      };
+    });
+
+    // 2. 物理清理已下架/已删除插件的源码目录
+    const pluginsRoot = path.join(this.repoDir, 'plugins');
+    if (fs.existsSync(pluginsRoot)) {
+      for (const entry of fs.readdirSync(pluginsRoot)) {
+        if (!validSlugs.has(entry)) {
+          fs.rmSync(path.join(pluginsRoot, entry), {
+            recursive: true,
+            force: true,
+          });
+        }
+      }
+    }
+
+    const manifestPath = path.join(
+      this.repoDir,
+      '.claude-plugin',
+      'marketplace.json',
+    );
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+
+    // 3. 提交索引变更 (需显式 remove 已删除文件的索引项)
+    await git.add({ fs, dir: this.repoDir, filepath: '.' });
+    const status = await git.statusMatrix({ fs, dir: this.repoDir });
+    for (const [filepath, , worktreeStatus] of status) {
+      if (worktreeStatus === 0) {
+        await git.remove({ fs, dir: this.repoDir, filepath });
+      }
+    }
+
+    const commitSha = await git.commit({
+      fs,
+      dir: this.repoDir,
+      author: {
+        name: 'SkillHub Release Bot',
+        email: 'release-bot@skillhub.corp',
+      },
+      message: `chore(marketplace): rebuild index (${manifest.plugins.length} plugins online)`,
+    });
+
+    console.log(
+      `🔄 市场索引已重建，当前在线插件 ${manifest.plugins.length} 个! Commit: ${commitSha}`,
+    );
+    return commitSha;
+  }
 }

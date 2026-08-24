@@ -43,6 +43,7 @@ interface HeaderProps {
   starredCount?: number;
   mySubmissionsCount?: number;
   isSuperAdmin?: boolean;
+  backendOnline?: boolean | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -60,7 +61,8 @@ export const Header: React.FC<HeaderProps> = ({
   pendingReviewsCount,
   openDemandsCount = 0,
   starredCount = 0,
-  mySubmissionsCount = 0
+  mySubmissionsCount = 0,
+  backendOnline = null
 }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -100,6 +102,10 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200/60">
                   企业内网
                 </span>
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${backendOnline === false ? 'bg-amber-400' : backendOnline ? 'bg-emerald-500' : 'bg-slate-300 animate-pulse'}`}
+                  title={backendOnline === false ? '后端离线：当前使用本地演示数据' : backendOnline ? '企业后端已连接' : '正在连接企业后端'}
+                />
               </div>
               <div className="text-[10px] text-slate-400 font-mono hidden sm:block">
                 AI 技能与 MCP 插件市场

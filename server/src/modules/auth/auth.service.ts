@@ -3,6 +3,7 @@ import {
   ConflictException,
   UnauthorizedException,
   NotFoundException,
+  BadRequestException,
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -168,6 +169,52 @@ export class AuthService implements OnModuleInit {
   async findUserById(id: string): Promise<UserSession | null> {
     const user = await this.userRepository.findOne({ where: { id } });
     return user ? this.toSessionUser(user) : null;
+  }
+
+  /**
+   * 超级管理员变更指定用户的组织角色权限
+   * @param userId 目标用户 ID
+   * @param role 新角色 ('developer' | 'admin' | 'super_admin')
+   */
+  async updateUserRole(userId: string, role: string): Promise<UserSession> {
+    const allowed = ['developer', 'admin', 'super_admin'];
+    if (!allowed.includes(role)) {
+      throw new BadRequestException(`角色必须为 ${allowed.join(' / ')} 之一`);
+    }
+
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('未找到指定企业用户');
+    }
+
+    user.role = role;
+    const saved = await this.userRepository.save(user);
+    return this.toSessionUser(saved);
+  }
+
+  /**
+   * 调整用户悬赏积分余额 (发布需求扣分 / 需求交付奖励加分)
+   * @param userId 目标用户 ID
+   * @param delta 积分增量 (负数表示扣减)
+   */
+  async adjustUserPoints(userId: string, delta: number): Promise<UserSession> {
+    if (typeof delta !== 'number' || Number.isNaN(delta)) {
+      throw new BadRequestException('积分增量必须为合法数值');
+    }
+
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('未找到指定企业用户');
+    }
+
+    const next = (user.points ?? 0) + Math.round(delta);
+    if (next < 0) {
+      throw new BadRequestException('积分余额不足，无法完成本次扣减');
+    }
+
+    user.points = next;
+    const saved = await this.userRepository.save(user);
+    return this.toSessionUser(saved);
   }
 
   /**
