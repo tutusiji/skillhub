@@ -48,11 +48,31 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   }
 
   const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
+
+  // 响应体可能不是 JSON（代理层 502 页面 / 网关 HTML），解析失败不应抛 SyntaxError
+  let data: any = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
+
   if (!response.ok) {
+    // 502/503/504 通常是 dev 代理或网关连不上 NestJS，而非业务错误：给出可操作提示
+    if (response.status === 502 || response.status === 503 || response.status === 504) {
+      backendOnline = false;
+      throw new Error(
+        data?.message ||
+          `后端服务未就绪 (${response.status})，请确认 NestJS 已启动 (pnpm run server:dev)`
+      );
+    }
     const message = Array.isArray(data?.message)
       ? data.message.join('；')
-      : data?.message || `请求失败 (${response.status})`;
+      : data?.message ||
+        (text && !data ? `请求失败 (${response.status})：${text.slice(0, 120)}` : '') ||
+        `请求失败 (${response.status})`;
     throw new Error(message);
   }
   return data as T;
