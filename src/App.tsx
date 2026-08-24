@@ -13,7 +13,6 @@ import {
   DeepSeekConfig,
   FeedbackItem, 
   SkillDemand,
-  SkillDemandCandidate,
   SkillItem, 
   ToastMessage, 
   UserAccount,
@@ -38,7 +37,7 @@ import { BackToTop } from './components/BackToTop';
 import { ToastContainer } from './components/Toast';
 import { downloadSkillAsZip } from './utils/zipHelper';
 import { executeDualEngineAudit } from './utils/auditRunner';
-import { api, mapApiSkill, mapApiUser, mapAuditRule, syncToBackend } from './services/api';
+import { api, mapApiDemand, mapApiSkill, mapApiUser, mapAuditRule, syncToBackend } from './services/api';
 
 export default function App() {
   // Users state with LocalStorage persistence
@@ -271,10 +270,11 @@ export default function App() {
     let cancelled = false;
 
     (async () => {
-      const [skillsResult, usersResult, rulesResult] = await Promise.allSettled([
+      const [skillsResult, usersResult, rulesResult, demandsResult] = await Promise.allSettled([
         api.listSkills(),
         api.listUsers(),
         api.listAuditRules(),
+        api.listDemands(),
       ]);
 
       if (cancelled) return;
@@ -289,11 +289,15 @@ export default function App() {
       if (rulesResult.status === 'fulfilled') {
         setRules(rulesResult.value.map(mapAuditRule));
       }
+      if (demandsResult.status === 'fulfilled') {
+        setDemands(demandsResult.value.map(mapApiDemand));
+      }
 
       if (
         skillsResult.status === 'rejected' &&
         usersResult.status === 'rejected' &&
-        rulesResult.status === 'rejected'
+        rulesResult.status === 'rejected' &&
+        demandsResult.status === 'rejected'
       ) {
         setBackendOnline(false);
         console.warn('SkillHub backend unavailable; using offline demo data.', skillsResult.reason);
@@ -519,6 +523,7 @@ export default function App() {
         clients: newSkill.clients,
         tags: newSkill.tags,
         readme: newSkill.readme,
+        expertDomain: newSkill.expertDomain,
         fileTree: newSkill.fileTree,
       });
 
@@ -551,213 +556,181 @@ export default function App() {
 
   // ==========================================
   // SKILL DEMANDS CRUD & WORKFLOW HANDLERS
+  // 需求与悬赏积分强依赖后端事务：积分扣减/退还/发放必须由服务端裁决，
+  // 前端只负责回显结果，避免刷新后余额漂移或重复退款
   // ==========================================
-  const handleCreateDemand = (newDemandData: Omit<SkillDemand, 'id' | 'createdAt' | 'updatedAt' | 'submissionsCount'>) => {
-    if (!currentUser) return;
-    
-    // Deduct user points
-    const pointsCost = newDemandData.bountyPoints;
-    const remainingPoints = (currentUser.points ?? 10000) - pointsCost;
 
-    const updatedUser: UserAccount = {
-      ...currentUser,
-      points: Math.max(0, remainingPoints)
-    };
-
-    setCurrentUser(updatedUser);
-    setAllUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
-
-    // 悬赏积分扣减同步至后端账户，保证跨端余额一致
-    void syncToBackend(
-      () => api.adjustUserPoints(currentUser.id, -pointsCost),
-      '扣减悬赏积分'
-    );
-
-    const newDemand: SkillDemand = {
-      ...newDemandData,
-      id: `demand-${Date.now()}`,
-      submissionsCount: 0,
-      candidates: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
-    setDemands(prev => [newDemand, ...prev]);
-    addToast('success', '需求已提交审核', `已扣除 ${pointsCost} 奖励积分，管理员审核通过后将在征集广场展示！`);
+  /**
+   * 以后端返回结果为准回写单条需求，并同步详情弹窗
+   * @param updated 后端返回的需求实体
+   */
+  const mergeDemandFromServer = (updated: SkillDemand) => {
+    setDemands(prev => prev.map(d => (d.id === updated.id ? updated : d)));
+    setSelectedDemand(prev => (prev && prev.id === updated.id ? updated : prev));
   };
 
-  const handleApproveDemand = (demandId: string) => {
-    if (!currentUser || (currentUser.role !== 'super_admin' && currentUser.role !== 'admin')) {
+  /**
+   * 从后端刷新当前用户与组织成员的积分余额
+   * 需求相关操作会改动积分，操作后统一回源，保证余额显示与服务端一致
+   */
+  const refreshPointsFromServer = async () => {
+    const [profileResult, usersResult] = await Promise.allSettled([
+      api.profile(),
+      api.listUsers(),
+    ]);
+
+    if (profileResult.status === 'fulfilled') {
+      const fresh = profileResult.value;
+      setCurrentUser(prev =>
+        prev
+          ? { ...prev, points: fresh.points ?? prev.points, role: (fresh.role as UserRole) ?? prev.role }
+          : prev
+      );
+    }
+    if (usersResult.status === 'fulfilled') {
+      setAllUsers(usersResult.value.map(mapApiUser));
+    }
+  };
+
+  const handleCreateDemand = async (
+    newDemandData: Omit<SkillDemand, 'id' | 'createdAt' | 'updatedAt' | 'submissionsCount'>
+  ) => {
+    if (!currentUser) return;
+
+    // 由后端在同一事务内校验余额、扣减积分并落库需求
+    try {
+      const created = await api.createDemand({
+        title: newDemandData.title,
+        description: newDemandData.description,
+        targetDomain: newDemandData.targetDomain,
+        expectedOutput: newDemandData.expectedOutput,
+        bountyPoints: newDemandData.bountyPoints,
+        deadlineText: newDemandData.deadlineText,
+      });
+
+      setDemands(prev => [mapApiDemand(created), ...prev]);
+      await refreshPointsFromServer();
+      addToast(
+        'success',
+        '需求已提交审核',
+        `已扣除 ${created.bountyPoints} 奖励积分，管理员审核通过后将在征集广场展示！`
+      );
+    } catch (error) {
+      addToast('error', '需求发布失败', (error as Error).message);
+    }
+  };
+
+  const handleApproveDemand = async (demandId: string) => {
+    if (!isPrivilegedUser()) {
       addToast('warning', '权限不足', '仅管理员可审核征集需求');
       return;
     }
 
-    setDemands(prev =>
-      prev.map(d => {
-        if (d.id === demandId) {
-          return {
-            ...d,
-            status: 'approved',
-            reviewedBy: `${currentUser.name} (${currentUser.role === 'super_admin' ? '超级管理员' : '管理员'})`,
-            reviewedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          };
-        }
-        return d;
-      })
-    );
-
-    if (selectedDemand?.id === demandId) {
-      setSelectedDemand(prev => prev ? {
-        ...prev,
-        status: 'approved',
-        reviewedBy: currentUser.name,
-        reviewedAt: new Date().toISOString()
-      } : null);
+    try {
+      const updated = await api.approveDemand(demandId);
+      mergeDemandFromServer(mapApiDemand(updated));
+      addToast('success', '需求审核通过', '该技能征集需求已在全站征集广场公开！');
+    } catch (error) {
+      addToast('error', '审核失败', (error as Error).message);
     }
-
-    addToast('success', '需求审核通过', '该技能征集需求已在全站征集广场公开！');
   };
 
-  const handleRejectDemand = (demandId: string, reason: string) => {
-    if (!currentUser || (currentUser.role !== 'super_admin' && currentUser.role !== 'admin')) {
+  const handleRejectDemand = async (demandId: string, reason: string) => {
+    if (!isPrivilegedUser()) {
       addToast('warning', '权限不足', '仅管理员可驳回征集需求');
       return;
     }
 
-    const targetDemand = demands.find(d => d.id === demandId);
-    if (!targetDemand) return;
-
-    // Refund bounty points to author
-    const authorId = targetDemand.author.id;
-    setAllUsers(prev => prev.map(u => {
-      if (u.id === authorId) {
-        return { ...u, points: (u.points ?? 10000) + targetDemand.bountyPoints };
-      }
-      return u;
-    }));
-
-    if (currentUser.id === authorId) {
-      setCurrentUser(prev => prev ? { ...prev, points: (prev.points ?? 10000) + targetDemand.bountyPoints } : null);
+    try {
+      const updated = await api.rejectDemand(demandId, reason);
+      mergeDemandFromServer(mapApiDemand(updated));
+      await refreshPointsFromServer();
+      addToast(
+        'info',
+        '需求已驳回并退还积分',
+        `已将 ${updated.bountyPoints} 积分退回发布者账户`
+      );
+    } catch (error) {
+      addToast('error', '驳回失败', (error as Error).message);
     }
-
-    // 驳回需求时退还悬赏积分，同步至后端账户
-    void syncToBackend(
-      () => api.adjustUserPoints(authorId, targetDemand.bountyPoints),
-      '退还悬赏积分(驳回)'
-    );
-
-    setDemands(prev =>
-      prev.map(d => {
-        if (d.id === demandId) {
-          return {
-            ...d,
-            status: 'rejected',
-            rejectReason: reason,
-            reviewedBy: `${currentUser.name} (${currentUser.role === 'super_admin' ? '超级管理员' : '管理员'})`,
-            reviewedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          };
-        }
-        return d;
-      })
-    );
-
-    if (selectedDemand?.id === demandId) {
-      setSelectedDemand(prev => prev ? {
-        ...prev,
-        status: 'rejected',
-        rejectReason: reason,
-        reviewedBy: currentUser.name
-      } : null);
-    }
-
-    addToast('info', '需求已驳回并退还积分', `已将 ${targetDemand.bountyPoints} 积分退回发布者账户`);
   };
 
-  const handleDeleteDemand = (demandId: string) => {
+  const handleDeleteDemand = async (demandId: string) => {
     const targetDemand = demands.find(d => d.id === demandId);
     if (!targetDemand) return;
 
     const isAuthor = currentUser?.id === targetDemand.author.id;
-    const isSuperAdmin = currentUser?.role === 'super_admin';
-    const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
-
-    if (!isAuthor && !isAdmin) {
+    if (!isAuthor && !isPrivilegedUser()) {
       addToast('warning', '权限不足', '仅需求发布者或管理员有权删除该需求');
       return;
     }
 
-    // If demand was pending or active, refund points to author if author deletes or admin deletes
-    if (targetDemand.status === 'pending' || targetDemand.status === 'approved') {
-      const authorId = targetDemand.author.id;
-      setAllUsers(prev => prev.map(u => {
-        if (u.id === authorId) {
-          return { ...u, points: (u.points ?? 10000) + targetDemand.bountyPoints };
-        }
-        return u;
-      }));
-
-      if (currentUser?.id === authorId) {
-        setCurrentUser(prev => prev ? { ...prev, points: (prev.points ?? 10000) + targetDemand.bountyPoints } : null);
+    try {
+      // 后端按需求状态决定是否退还积分（已交付的不再退还），并返回实际退款额
+      const result = await api.deleteDemand(demandId);
+      setDemands(prev => prev.filter(d => d.id !== demandId));
+      if (selectedDemand?.id === demandId) {
+        setSelectedDemand(null);
       }
-
-      // 删除未交付需求时退还悬赏积分，同步至后端账户
-      void syncToBackend(
-        () => api.adjustUserPoints(authorId, targetDemand.bountyPoints),
-        '退还悬赏积分(删除)'
+      await refreshPointsFromServer();
+      addToast(
+        'success',
+        '需求已删除',
+        result.refunded > 0
+          ? `已删除该需求并退还 ${result.refunded} 悬赏积分`
+          : '已成功删除该技能征集需求记录'
       );
+    } catch (error) {
+      addToast('error', '删除失败', (error as Error).message);
     }
-
-    setDemands(prev => prev.filter(d => d.id !== demandId));
-    if (selectedDemand?.id === demandId) {
-      setSelectedDemand(null);
-    }
-
-    addToast('success', '需求已删除', '已成功删除该技能征集需求记录');
   };
 
-  const handleSubmitDemandSolution = (demandId: string, solutionNote: string, skillId?: string) => {
+  const handleSubmitDemandSolution = async (
+    demandId: string,
+    solutionNote: string,
+    skillId?: string
+  ) => {
     if (!requireAuth('提交技能方案')) return;
     if (!currentUser) return;
 
     const matchedSkill = skillId ? skills.find(s => s.id === skillId) : undefined;
-    const candidate: SkillDemandCandidate = {
-      id: `cand-${Date.now()}`,
-      skillId,
-      skillName: matchedSkill ? matchedSkill.name : '开发者定制方案',
-      submitterId: currentUser.id,
-      submitterName: currentUser.name,
-      submitterAvatar: currentUser.avatar,
-      submittedAt: new Date().toISOString(),
-      notes: solutionNote,
-      status: 'pending'
-    };
 
-    setDemands(prev =>
-      prev.map(d => {
-        if (d.id === demandId) {
-          const updatedCandidates = [...(d.candidates || []), candidate];
-          return {
-            ...d,
-            submissionsCount: updatedCandidates.length,
-            candidates: updatedCandidates,
-            updatedAt: new Date().toISOString()
-          };
-        }
-        return d;
-      })
-    );
-
-    if (selectedDemand?.id === demandId) {
-      setSelectedDemand(prev => prev ? {
-        ...prev,
-        submissionsCount: (prev.candidates?.length || 0) + 1,
-        candidates: [...(prev.candidates || []), candidate]
-      } : null);
+    try {
+      const updated = await api.submitDemandCandidate(demandId, {
+        notes: solutionNote,
+        skillId,
+        skillName: matchedSkill?.name,
+      });
+      mergeDemandFromServer(mapApiDemand(updated));
+      addToast('success', '方案提交成功', '需求发布者将收到通知并进行验收！');
+    } catch (error) {
+      addToast('error', '方案提交失败', (error as Error).message);
     }
+  };
 
-    addToast('success', '方案提交成功', '需求发布者将收到通知并进行验收！');
+  /**
+   * 需求发布者验收中选方案，后端在事务内把悬赏积分发放给方案提交者
+   * @param demandId 需求 ID
+   * @param candidateId 中选方案 ID
+   */
+  const handleAcceptDemandCandidate = async (demandId: string, candidateId: string) => {
+    if (!requireAuth('验收技能方案')) return;
+
+    try {
+      const updated = await api.acceptDemandCandidate(demandId, candidateId);
+      const mapped = mapApiDemand(updated);
+      mergeDemandFromServer(mapped);
+      await refreshPointsFromServer();
+
+      const winner = mapped.candidates?.find(c => c.id === candidateId);
+      addToast(
+        'success',
+        '方案验收完成',
+        `已将 ${mapped.bountyPoints} 悬赏积分发放给 ${winner?.submitterName ?? '方案提交者'}`
+      );
+    } catch (error) {
+      addToast('error', '验收失败', (error as Error).message);
+    }
   };
 
   // ==========================================
@@ -1441,6 +1414,7 @@ export default function App() {
           onRejectDemand={handleRejectDemand}
           onDeleteDemand={handleDeleteDemand}
           onSubmitResponse={handleSubmitDemandSolution}
+          onAcceptCandidate={handleAcceptDemandCandidate}
           onToast={addToast}
         />
       )}

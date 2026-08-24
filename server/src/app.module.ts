@@ -5,6 +5,7 @@ import { GitMarketModule } from './modules/git-market/git-market.module';
 import { SkillsModule } from './modules/skills/skills.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { DemandsModule } from './modules/demands/demands.module';
 
 /**
  * SkillHub 应用程序根模块
@@ -21,6 +22,7 @@ import { AuthModule } from './modules/auth/auth.module';
     GitMarketModule,
     SkillsModule,
     AuditModule,
+    DemandsModule,
   ],
   controllers: [],
   providers: [],

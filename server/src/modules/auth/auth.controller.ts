@@ -58,7 +58,8 @@ export class AuthController {
       throw new UnauthorizedException('请先登录获取访问令牌');
     }
 
-    const session = this.authService.validateToken(token);
+    // 回源数据库，确保积分余额与角色变更能即时反映到前端
+    const session = await this.authService.resolveFreshSession(token);
     if (!session) {
       throw new UnauthorizedException('无效或已过期的登录凭证');
     }

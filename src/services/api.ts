@@ -1,10 +1,13 @@
 import type {
   AuditRule,
   ClientPlatform,
+  ExpertDomain,
   FileTreeNode,
   RuleSeverity,
   RuleType,
   SkillCategory,
+  SkillDemand,
+  SkillDemandCandidate,
   SkillItem,
   UserAccount,
   UserRole,
@@ -122,6 +125,8 @@ export interface ApiSkill {
   permissions?: string[];
   installCommands: SkillItem['installCommands'];
   fileTree?: RawFileTreeNode[];
+  readme?: string;
+  expertDomain?: string;
   auditScore?: number;
   reviewedBy?: string | null;
   reviewedAt?: string | null;
@@ -154,7 +159,8 @@ export function mapApiSkill(skill: ApiSkill): SkillItem {
     updatedAt: skill.updatedAt ?? skill.createdAt ?? new Date().toISOString(),
     status: (skill.status ?? 'pending') as SkillItem['status'],
     permissions: skill.permissions ?? [],
-    readme: skill.description,
+    readme: skill.readme || skill.description,
+    expertDomain: (skill.expertDomain as SkillItem['expertDomain']) ?? undefined,
     fileTree: normalizeFileTree(skill.fileTree ?? []),
     installCommands: skill.installCommands,
     auditResults: {
@@ -225,6 +231,59 @@ export function mapAuditRule(rule: ApiAuditRule): AuditRule {
   };
 }
 
+export interface ApiSkillDemand {
+  id: string;
+  title: string;
+  description: string;
+  targetDomain: string;
+  expectedOutput?: string;
+  bountyPoints: number;
+  deadlineText?: string;
+  authorId: string;
+  authorName: string;
+  authorAvatar?: string;
+  authorDepartment?: string;
+  status: string;
+  rejectReason?: string | null;
+  candidates?: SkillDemandCandidate[];
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * 将后端需求实体映射为前端 SkillDemand 结构
+ * 后端以扁平字段存储发布者快照，前端使用嵌套 author 对象，此处负责结构转换
+ * @param demand 后端返回的需求实体
+ */
+export function mapApiDemand(demand: ApiSkillDemand): SkillDemand {
+  const candidates = demand.candidates ?? [];
+  return {
+    id: demand.id,
+    title: demand.title,
+    description: demand.description,
+    targetDomain: demand.targetDomain as ExpertDomain,
+    expectedOutput: demand.expectedOutput ?? '',
+    bountyPoints: demand.bountyPoints,
+    deadlineText: demand.deadlineText ?? '永久有效',
+    author: {
+      id: demand.authorId,
+      name: demand.authorName,
+      avatar: demand.authorAvatar ?? '',
+      department: demand.authorDepartment ?? '技术研发中心',
+    },
+    status: demand.status as SkillDemand['status'],
+    rejectReason: demand.rejectReason ?? undefined,
+    submissionsCount: candidates.length,
+    candidates,
+    createdAt: demand.createdAt ?? new Date().toISOString(),
+    updatedAt: demand.updatedAt ?? demand.createdAt ?? new Date().toISOString(),
+    reviewedBy: demand.reviewedBy ?? undefined,
+    reviewedAt: demand.reviewedAt ?? undefined,
+  };
+}
+
 export const api = {
   async listSkills(): Promise<ApiSkill[]> {
     return apiFetch<ApiSkill[]>('/api/v1/skills');
@@ -274,6 +333,7 @@ export const api = {
     clients?: string[];
     tags?: string[];
     readme?: string;
+    expertDomain?: string;
     fileTree?: unknown[];
   }): Promise<ApiSkill> {
     return apiFetch<ApiSkill>('/api/v1/skills/upload', {
@@ -427,6 +487,94 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ delta }),
     });
+  },
+
+  /**
+   * 获取技能征集需求列表
+   */
+  async listDemands(): Promise<ApiSkillDemand[]> {
+    return apiFetch<ApiSkillDemand[]>('/api/v1/demands');
+  },
+
+  /**
+   * 发布新的技能征集需求（后端会在事务内扣减悬赏积分）
+   * @param payload 需求表单数据
+   */
+  async createDemand(payload: {
+    title: string;
+    description: string;
+    targetDomain: string;
+    expectedOutput?: string;
+    bountyPoints: number;
+    deadlineText?: string;
+  }): Promise<ApiSkillDemand> {
+    return apiFetch<ApiSkillDemand>('/api/v1/demands', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * 管理员审核通过需求，公开至征集广场
+   * @param id 需求 ID
+   */
+  async approveDemand(id: string): Promise<ApiSkillDemand> {
+    return apiFetch<ApiSkillDemand>(`/api/v1/demands/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+
+  /**
+   * 管理员驳回需求（后端同步退还悬赏积分）
+   * @param id 需求 ID
+   * @param reason 驳回理由
+   */
+  async rejectDemand(id: string, reason: string): Promise<ApiSkillDemand> {
+    return apiFetch<ApiSkillDemand>(`/api/v1/demands/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  },
+
+  /**
+   * 删除需求（未交付的需求后端会退还悬赏积分）
+   * @param id 需求 ID
+   */
+  async deleteDemand(
+    id: string
+  ): Promise<{ success: boolean; id: string; refunded: number }> {
+    return apiFetch(`/api/v1/demands/${id}`, { method: 'DELETE' });
+  },
+
+  /**
+   * 提交应征方案
+   * @param id 需求 ID
+   * @param payload 方案说明与关联技能
+   */
+  async submitDemandCandidate(
+    id: string,
+    payload: { notes: string; skillId?: string; skillName?: string }
+  ): Promise<ApiSkillDemand> {
+    return apiFetch<ApiSkillDemand>(`/api/v1/demands/${id}/candidates`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * 验收中选方案，后端把悬赏积分发放给方案提交者
+   * @param id 需求 ID
+   * @param candidateId 中选方案 ID
+   */
+  async acceptDemandCandidate(
+    id: string,
+    candidateId: string
+  ): Promise<ApiSkillDemand> {
+    return apiFetch<ApiSkillDemand>(
+      `/api/v1/demands/${id}/candidates/${candidateId}/accept`,
+      { method: 'POST', body: JSON.stringify({}) }
+    );
   },
 };
 

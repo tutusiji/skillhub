@@ -259,12 +259,30 @@ export class AuthService implements OnModuleInit {
   }
 
   /**
+   * 解析令牌并从数据库加载最新用户画像
+   * JWT 载荷是签发时的快照 (不含 points，且角色可能已被管理员变更)，
+   * 因此 /auth/me 必须回源数据库，否则前端看到的积分余额与权限会一直过期
+   * @param token 访问令牌
+   */
+  async resolveFreshSession(token: string): Promise<UserSession | null> {
+    const session = this.validateToken(token);
+    if (!session) return null;
+
+    const user = await this.userRepository.findOne({
+      where: { id: session.id },
+    });
+    // 历史演示 Token 在库中没有对应记录，退回令牌快照保证兼容
+    return user ? this.toSessionUser(user) : session;
+  }
+
+  /**
    * 判定指定接口路径是否允许公开/匿名访问
    * @param path 请求路径
    */
   isAnonymousAllowed(path: string): boolean {
     const publicPaths = [
       '/api/v1/skills',
+      '/api/v1/demands',
       '/api/v1/auth/login',
       '/api/v1/auth/register',
       '/api/v1/auth/users',

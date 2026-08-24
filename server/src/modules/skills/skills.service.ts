@@ -290,6 +290,7 @@ export class SkillsService implements OnModuleInit {
     clients?: string[];
     tags?: string[];
     readme?: string;
+    expertDomain?: string;
     fileTree?: FileTreeNode[];
     zipBuffer?: Buffer;
   }): Promise<SkillEntity> {
@@ -363,6 +364,9 @@ export class SkillsService implements OnModuleInit {
         cli: `npx @skillhub/cli install ${fullSlug}`,
       },
       fileTree,
+      // 保留开发者填写的完整说明文档与适用专家组，避免详情页回显丢失
+      readme: payload.readme || payload.description,
+      expertDomain: payload.expertDomain || null,
       auditScore: scanResult.score,
     });
 

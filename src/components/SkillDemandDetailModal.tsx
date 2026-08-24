@@ -32,6 +32,7 @@ interface SkillDemandDetailModalProps {
   onRejectDemand?: (id: string, reason: string) => void;
   onDeleteDemand?: (id: string) => void;
   onSubmitResponse?: (demandId: string, solutionNote: string, skillId?: string) => void;
+  onAcceptCandidate?: (demandId: string, candidateId: string) => void;
   onToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, message: string) => void;
 }
 
@@ -45,6 +46,7 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
   onRejectDemand,
   onDeleteDemand,
   onSubmitResponse,
+  onAcceptCandidate,
   onToast
 }) => {
   const [rejectReason, setRejectReason] = useState('');
@@ -59,11 +61,18 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
   const isSuperAdmin = currentUser?.role === 'super_admin';
   const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
   const isAuthor = currentUser?.id === demand.author.id;
+  const candidates = demand.candidates ?? [];
+  // 已完结需求不可再次验收，积分只能发放一次
+  const canAcceptCandidates =
+    (isAuthor || isAdmin) && demand.status !== 'fulfilled' && !!onAcceptCandidate;
+  // 同一用户只能揭榜一次，已提交后隐藏入口
+  const hasSubmitted = candidates.some(c => c.submitterId === currentUser?.id);
 
+  // 审核/驳回/删除的结果提示由 App.tsx 依据后端响应统一发出，
+  // 此处不再乐观提示，避免后端失败时仍显示"成功"
   const handleApprove = () => {
     if (onApproveDemand) {
       onApproveDemand(demand.id);
-      onToast('success', '需求已审核通过', '该技能征集需求已在全站广场公开展示！');
       onClose();
     }
   };
@@ -75,7 +84,6 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
     }
     if (onRejectDemand) {
       onRejectDemand(demand.id, rejectReason.trim());
-      onToast('info', '需求已驳回', '已记录驳回理由并将状态更新为已驳回');
       setShowRejectBox(false);
       onClose();
     }
@@ -85,9 +93,24 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
     if (window.confirm('确定要删除此技能需求吗？如果是发布者删除，冻结的奖励积分将退回。')) {
       if (onDeleteDemand) {
         onDeleteDemand(demand.id);
-        onToast('info', '需求已删除', isAuthor ? '需求已撤销，奖励积分已退回您的账户' : '管理员已将该需求从系统中移除');
         onClose();
       }
+    }
+  };
+
+  /**
+   * 采纳指定方案，二次确认后由后端发放悬赏积分
+   * @param candidateId 方案 ID
+   * @param submitterName 方案提交者姓名，用于确认文案
+   */
+  const handleAccept = (candidateId: string, submitterName: string) => {
+    if (!onAcceptCandidate) return;
+    if (
+      window.confirm(
+        `确认采纳 ${submitterName} 的方案吗？\n\n${demand.bountyPoints} 悬赏积分将发放给该开发者，需求随即标记为已完结，此操作不可撤销。`
+      )
+    ) {
+      onAcceptCandidate(demand.id, candidateId);
     }
   };
 
@@ -99,7 +122,6 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
     }
     if (onSubmitResponse) {
       onSubmitResponse(demand.id, solutionNote.trim(), selectedSkillId || undefined);
-      onToast('success', '揭榜响应已提交', '需求发起人将收到您的技术方案通知！');
       setShowRespondBox(false);
       setSolutionNote('');
     }
@@ -238,7 +260,7 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
               <MessageSquare className="w-4 h-4 text-indigo-500" />
               <span>揭榜与技术方案响应 ({demand.submissionsCount || 0})</span>
             </h4>
-            {currentUser && (demand.status === 'open' || demand.status === 'approved') && !showRespondBox && (
+            {currentUser && !isAuthor && !hasSubmitted && (demand.status === 'open' || demand.status === 'approved') && !showRespondBox && (
               <button
                 onClick={() => setShowRespondBox(true)}
                 className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-sm"
@@ -300,7 +322,76 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
             </form>
           )}
 
-          {(!demand.submissionsCount || demand.submissionsCount === 0) && !showRespondBox && (
+          {/* 应征方案清单：发布者可在此验收并发放悬赏积分 */}
+          {candidates.length > 0 && (
+            <div className="space-y-2.5">
+              {candidates.map(candidate => (
+                <div
+                  key={candidate.id}
+                  className={`p-3.5 rounded-2xl border space-y-2 ${
+                    candidate.status === 'accepted'
+                      ? 'bg-emerald-50/70 border-emerald-200'
+                      : candidate.status === 'rejected'
+                        ? 'bg-slate-50 border-slate-200 opacity-70'
+                        : 'bg-white border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <img
+                      src={candidate.submitterAvatar}
+                      alt={candidate.submitterName}
+                      className="w-7 h-7 rounded-full object-cover border border-slate-200"
+                    />
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-slate-800 truncate">
+                        {candidate.submitterName}
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        {new Date(candidate.submittedAt).toLocaleString()}
+                      </div>
+                    </div>
+
+                    {candidate.status === 'accepted' && (
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[11px] font-bold border border-emerald-300 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" />
+                        已中选并发放积分
+                      </span>
+                    )}
+                    {candidate.status === 'rejected' && (
+                      <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 text-[11px] font-bold border border-slate-200">
+                        未中选
+                      </span>
+                    )}
+
+                    {/* 仅需求发布者/管理员可在未完结时验收方案 */}
+                    {canAcceptCandidates && candidate.status === 'pending' && (
+                      <button
+                        onClick={() => handleAccept(candidate.id, candidate.submitterName)}
+                        className="ml-auto px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+                        title={`采纳该方案并发放 ${demand.bountyPoints} 积分`}
+                      >
+                        <Coins className="w-3.5 h-3.5" />
+                        <span>采纳并发放积分</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-[11px] text-indigo-700 font-bold">
+                    <Layers className="w-3.5 h-3.5" />
+                    <span className="truncate">{candidate.skillName}</span>
+                  </div>
+
+                  {candidate.notes && (
+                    <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">
+                      {candidate.notes}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {candidates.length === 0 && !showRespondBox && (
             <div className="p-6 rounded-2xl bg-slate-50 text-center text-xs text-slate-400">
               暂无揭榜方案，成为第一个响应并赢取 <strong>{demand.bountyPoints} 积分</strong> 的开发者吧！
             </div>

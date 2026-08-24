@@ -89,6 +89,14 @@ export class SkillEntity {
   @Column('simple-json', { default: '[]' })
   fileTree: any[];
 
+  /** 技能说明文档 (SKILL.md / README 正文，与 description 摘要区分) */
+  @Column({ type: 'text', nullable: true })
+  readme: string;
+
+  /** 适用专家组/岗位领域 (fullstack / dba / sre / ...) */
+  @Column({ name: 'expert_domain', length: 50, nullable: true })
+  expertDomain: string;
+
   /** 双引擎风控综合评分 (0~100) */
   @Column({ default: 100 })
   auditScore: number;
