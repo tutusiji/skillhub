@@ -30,3 +30,11 @@ export function getMarketplaceGitUrl(): string {
 export function getMarketplaceAddCommand(): string {
   return `claude plugin marketplace add ${getMarketplaceGitUrl()}`;
 }
+
+/**
+ * 生成同步市场仓库的命令
+ * 后续市场新增/更新插件时，客户端需执行该命令拉取最新清单，否则安装不到新插件
+ */
+export function getMarketplaceUpdateCommand(): string {
+  return `claude plugin marketplace update ${MARKETPLACE_NAME}`;
+}

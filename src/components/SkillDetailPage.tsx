@@ -29,7 +29,7 @@ import confetti from 'canvas-confetti';
 import { SkillItem } from '../types';
 import { FileTreeViewer } from './FileTreeViewer';
 import { AuditReportInspector } from './AuditReportInspector';
-import { getMarketplaceAddCommand } from '../utils/marketplace';
+import { getMarketplaceAddCommand, getMarketplaceUpdateCommand } from '../utils/marketplace';
 
 interface SkillDetailPageProps {
   skill: SkillItem;
@@ -58,10 +58,13 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
   const [activeCliTab, setActiveCliTab] = useState<'claude' | 'cursor' | 'mcp' | 'cli'>('claude');
   const [copiedCmd, setCopiedCmd] = useState(false);
   const [copiedMarketCmd, setCopiedMarketCmd] = useState(false);
+  const [copiedMarketUpdateCmd, setCopiedMarketUpdateCmd] = useState(false);
   const [highlightedFileInTree, setHighlightedFileInTree] = useState<string | undefined>(undefined);
 
   // 首次接入企业市场的前置注册命令 (Claude Code 必须先 add 市场才能 install 插件)
   const marketplaceAddCommand = getMarketplaceAddCommand();
+  // 市场新增/更新插件后需执行的市场仓库同步命令
+  const marketplaceUpdateCommand = getMarketplaceUpdateCommand();
 
   const currentCommand = 
     activeCliTab === 'claude' ? skill.installCommands.claude :
@@ -84,6 +87,16 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
     setCopiedMarketCmd(true);
     onCopySuccess('已复制企业市场注册命令至剪贴板');
     setTimeout(() => setCopiedMarketCmd(false), 2000);
+  };
+
+  /**
+   * 复制市场仓库升级命令，供市场新增插件后客户端拉取最新清单
+   */
+  const handleCopyMarketUpdateCommand = () => {
+    navigator.clipboard.writeText(marketplaceUpdateCommand);
+    setCopiedMarketUpdateCmd(true);
+    onCopySuccess('已复制市场仓库升级命令至剪贴板');
+    setTimeout(() => setCopiedMarketUpdateCmd(false), 2000);
   };
 
   const handleLike = () => {
@@ -495,6 +508,26 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
                   <p className="text-[11px] text-amber-800">
                     已注册过市场的同学可直接执行下方步骤 2 的安装命令。
                   </p>
+
+                  {/* 市场仓库升级：后续新增/更新插件后需执行，否则安装不到新插件 */}
+                  <div className="pt-2 border-t border-amber-300/50 mt-1">
+                    <p className="text-xs font-bold text-amber-900">
+                      市场仓库升级 · 新插件发布后执行一次即可同步
+                    </p>
+                    <div className="relative rounded-xl bg-slate-950 text-slate-100 p-3 font-mono text-[11px] sm:text-xs overflow-x-auto flex items-center justify-between gap-3 border border-slate-800 mt-2">
+                      <span className="text-emerald-400 select-none font-bold">$</span>
+                      <span className="flex-1 font-mono text-slate-200 whitespace-nowrap">
+                        {marketplaceUpdateCommand}
+                      </span>
+                      <button
+                        onClick={handleCopyMarketUpdateCommand}
+                        className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-sans text-[11px] font-semibold flex items-center gap-1.5 shrink-0 transition-colors"
+                      >
+                        {copiedMarketUpdateCmd ? <Check className="w-3 h-3 text-emerald-300" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedMarketUpdateCmd ? '已复制' : '复制'}</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
