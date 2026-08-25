@@ -11,7 +11,10 @@
     "lint": "tsc --noEmit",
     "server:dev": "pnpm --filter skillhub-server run start:dev",
     "server:build": "pnpm --filter skillhub-server run build",
-    "server:start": "pnpm --filter skillhub-server run start:prod"
+    "server:start": "pnpm --filter skillhub-server run start:prod",
+    "test:regression": "node scripts/regression-test.mjs",
+    "test:plugin-e2e": "bash scripts/claude-plugin-e2e.sh",
+    "test:all": "pnpm run lint && pnpm run test:regression && pnpm run test:plugin-e2e"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -27,6 +27,7 @@ import confetti from 'canvas-confetti';
 import { AuditExecutionSummary, SkillItem } from '../types';
 import { FileTreeViewer } from './FileTreeViewer';
 import { AuditReportInspector } from './AuditReportInspector';
+import { getMarketplaceAddCommand } from '../utils/marketplace';
 
 interface SkillDetailModalProps {
   skill: SkillItem | null;
@@ -53,6 +54,10 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<TabKey>('readme');
   const [activeCliTab, setActiveCliTab] = useState<'claude' | 'cursor' | 'mcp' | 'cli'>('claude');
+
+  // 首次接入企业市场的前置注册命令 (Claude Code 必须先 add 市场才能 install 插件)
+  const marketplaceAddCommand = getMarketplaceAddCommand();
+  const [copiedMarketCmd, setCopiedMarketCmd] = useState(false);
   const [copiedCmd, setCopiedCmd] = useState(false);
   const [highlightedFileInTree, setHighlightedFileInTree] = useState<string | undefined>(undefined);
 
@@ -63,6 +68,16 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
     activeCliTab === 'cursor' ? skill.installCommands.cursor :
     activeCliTab === 'mcp' ? skill.installCommands.mcp :
     skill.installCommands.cli;
+
+  /**
+   * 复制企业市场注册命令，供首次接入的同学一键完成 marketplace add
+   */
+  const handleCopyMarketCommand = () => {
+    navigator.clipboard.writeText(marketplaceAddCommand);
+    setCopiedMarketCmd(true);
+    onCopySuccess('已复制企业市场注册命令至剪贴板');
+    setTimeout(() => setCopiedMarketCmd(false), 2000);
+  };
 
   const handleCopyCommand = () => {
     navigator.clipboard.writeText(currentCommand);
@@ -400,6 +415,30 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
                     <div className="text-[10px] text-slate-500 mt-0.5">NPX / Private Registry</div>
                   </button>
                 </div>
+
+                {/* Claude Code 首次接入必须先注册企业市场，否则 /plugin install 会报市场不存在 */}
+                {activeCliTab === 'claude' && (
+                  <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 space-y-2">
+                    <p className="text-[11px] font-bold text-amber-900">
+                      步骤 1 · 首次接入需先注册企业插件市场（仅需执行一次）
+                    </p>
+                    <div className="relative rounded-lg bg-slate-950 text-slate-100 p-2.5 font-mono text-[10px] overflow-x-auto flex items-center justify-between gap-2 border border-slate-800">
+                      <span className="text-emerald-400 select-none">$</span>
+                      <span className="flex-1 font-mono whitespace-nowrap">{marketplaceAddCommand}</span>
+                      <button
+                        onClick={handleCopyMarketCommand}
+                        className="px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-500 text-white font-sans text-[10px] font-semibold flex items-center gap-1 shrink-0 transition-colors"
+                      >
+                        {copiedMarketCmd ? <Check className="w-3 h-3 text-emerald-300" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedMarketCmd ? '已复制' : '复制'}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {activeCliTab === 'claude' && (
+                  <p className="text-[11px] font-bold text-slate-800">步骤 2 · 安装本技能插件</p>
+                )}
 
                 {/* Command box */}
                 <div className="relative rounded-xl bg-slate-950 text-slate-100 p-4 font-mono text-xs overflow-x-auto flex items-center justify-between gap-3 border border-slate-800">

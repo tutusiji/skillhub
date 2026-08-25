@@ -10,14 +10,53 @@ export interface PluginManifestItem {
   version: string;
   source: string;
   category?: string;
-  author?: string;
+  /** Claude Code 要求 author 为对象结构，不能是纯字符串 */
+  author?: { name: string; email?: string };
+}
+
+/** 市场归属方信息，Claude Code schema 中为必填对象 */
+export interface MarketplaceOwner {
+  name: string;
+  email?: string;
 }
 
 export interface MarketplaceManifest {
   name: string;
+  /** Claude Code 校验 marketplace.json 时 owner 为必填项，缺失会直接拒绝添加市场 */
+  owner: MarketplaceOwner;
   description: string;
   version: string;
   plugins: PluginManifestItem[];
+}
+
+/** 市场清单固定元信息，供初始化与重建时复用，避免多处硬编码漂移 */
+const MARKETPLACE_META = {
+  name: 'skillhub',
+  owner: {
+    name: 'SkillHub 企业管理员',
+    email: 'admin@skillhub.corp',
+  },
+  description: 'SkillHub 企业内网私有 AI 技能与插件集市',
+  version: '1.0.0',
+} as const;
+
+/**
+ * 将技能 slug 归一化为 Claude Code 插件名
+ * 市场本身已命名为 skillhub，故剔除 @skillhub/ scope 前缀，
+ * 让安装命令形如 `/plugin install sql-diagnose-agent@skillhub`，与前端展示保持一致
+ * @param slug 技能 slug，如 `@skillhub/sql-diagnose-agent`
+ */
+export function toPluginName(slug: string): string {
+  const stripped = (slug || '')
+    .trim()
+    .replace(/^@/, '')
+    .replace(/^skillhub\//, '')
+    .replace(/[/\s_]+/g, '-')
+    .replace(/[^a-zA-Z0-9-]/g, '')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
+  return stripped || 'unnamed-plugin';
 }
 
 /**
@@ -58,9 +97,7 @@ export class GitMarketService implements OnModuleInit {
       }
 
       const initialManifest: MarketplaceManifest = {
-        name: 'skillhub',
-        description: 'SkillHub 企业内网私有 AI 技能与插件集市',
-        version: '1.0.0',
+        ...MARKETPLACE_META,
         plugins: [],
       };
 
@@ -110,15 +147,15 @@ export class GitMarketService implements OnModuleInit {
       'marketplace.json',
     );
     if (!fs.existsSync(manifestPath)) {
-      return {
-        name: 'skillhub',
-        description: 'SkillHub 企业内网私有 AI 技能与插件集市',
-        version: '1.0.0',
-        plugins: [],
-      };
+      return { ...MARKETPLACE_META, plugins: [] };
     }
     const rawData = fs.readFileSync(manifestPath, 'utf-8');
-    return JSON.parse(rawData);
+    const parsed = JSON.parse(rawData) as MarketplaceManifest;
+    // 兼容历史仓库：早期清单没有 owner 字段，读取时补齐以通过 Claude Code 校验
+    if (!parsed.owner?.name) {
+      parsed.owner = { ...MARKETPLACE_META.owner };
+    }
+    return parsed;
   }
 
   /**
@@ -140,7 +177,7 @@ export class GitMarketService implements OnModuleInit {
   ): Promise<string> {
     await this.ensureRepoInitialized();
 
-    const cleanSlug = skill.slug.replace('@', '').replace('/', '-');
+    const cleanSlug = toPluginName(skill.slug);
     const pluginDir = path.join(this.repoDir, 'plugins', cleanSlug);
 
     if (!fs.existsSync(pluginDir)) {
@@ -161,29 +198,39 @@ export class GitMarketService implements OnModuleInit {
         fs.writeFileSync(filePath, content);
       }
     } else {
-      // 若无 ZIP，生成标准技能模板结构
+      // 若无 ZIP，生成标准技能模板结构：SKILL.md 需带 YAML frontmatter，否则 Claude Code 拒绝加载
       const skillsSubDir = path.join(pluginDir, 'skills');
       if (!fs.existsSync(skillsSubDir)) {
         fs.mkdirSync(skillsSubDir, { recursive: true });
       }
       fs.writeFileSync(
         path.join(skillsSubDir, 'SKILL.md'),
-        `# ${skill.name}\n\n${skill.description}\n\n## 适用端\nClaude Code / Cursor / MCP\n`,
+        this.buildSkillMarkdown(cleanSlug, skill.name, skill.description),
         'utf-8',
       );
     }
 
-    // 2. 确保单个插件元数据 .claude-plugin/plugin.json 存在
+    // 2. 确保插件内至少存在一个合法 SKILL.md，并推导 skills 字段指向的目录
+    const skillsField = this.resolveSkillsField(pluginDir, cleanSlug, skill);
+
+    // 3. 写入单个插件元数据 .claude-plugin/plugin.json
     const pluginMetaDir = path.join(pluginDir, '.claude-plugin');
     if (!fs.existsSync(pluginMetaDir)) {
       fs.mkdirSync(pluginMetaDir, { recursive: true });
     }
     const pluginJson = {
+      // $schema 与官方脚手架保持一致，便于 IDE 校验
+      $schema: 'https://anthropic.com/claude-code/plugin.schema.json',
       name: cleanSlug,
       version: version,
       description: skill.description,
-      author: skill.author || 'Enterprise AI Team',
-      skills: ['skills/SKILL.md'],
+      // author 统一为对象结构，与 Claude Code plugin schema 保持一致
+      author: {
+        name: skill.author || 'Enterprise AI Team',
+        email: MARKETPLACE_META.owner.email,
+      },
+      // skills 必须是「目录」路径数组，指向具体 SKILL.md 文件会被 schema 拒绝
+      skills: skillsField,
     };
     fs.writeFileSync(
       path.join(pluginMetaDir, 'plugin.json'),
@@ -191,7 +238,7 @@ export class GitMarketService implements OnModuleInit {
       'utf-8',
     );
 
-    // 3. 更新全局 .claude-plugin/marketplace.json
+    // 4. 更新全局 .claude-plugin/marketplace.json
     const manifest = this.getMarketplaceManifest();
     const existingIndex = manifest.plugins.findIndex(
       (p) => p.name === cleanSlug,
@@ -203,7 +250,7 @@ export class GitMarketService implements OnModuleInit {
       version: version,
       source: `./plugins/${cleanSlug}`,
       category: skill.category,
-      author: skill.author,
+      author: skill.author ? { name: skill.author } : undefined,
     };
 
     if (existingIndex >= 0) {
@@ -223,7 +270,7 @@ export class GitMarketService implements OnModuleInit {
       'utf-8',
     );
 
-    // 4. 执行 Git 暂存与 Commit 提交
+    // 5. 执行 Git 暂存与 Commit 提交
     await git.add({ fs, dir: this.repoDir, filepath: '.' });
     const commitSha = await git.commit({
       fs,
@@ -239,6 +286,127 @@ export class GitMarketService implements OnModuleInit {
       `📦 插件 [${cleanSlug}@${version}] 成功同步并提交至 Git 市场! Commit: ${commitSha}`,
     );
     return commitSha;
+  }
+
+  /**
+   * 校验某插件在仓库中的目录结构是否符合 Claude Code 当前 schema
+   * 用于启动自愈：早期版本生成的 skills 字段指向 SKILL.md 文件，会导致 plugin install 失败
+   * @param slug 技能 slug (未规范化亦可)
+   */
+  isPluginLayoutValid(slug: string): boolean {
+    const cleanSlug = toPluginName(slug);
+    const pluginJsonPath = path.join(
+      this.repoDir,
+      'plugins',
+      cleanSlug,
+      '.claude-plugin',
+      'plugin.json',
+    );
+    if (!fs.existsSync(pluginJsonPath)) return false;
+
+    try {
+      const parsed = JSON.parse(fs.readFileSync(pluginJsonPath, 'utf-8')) as {
+        skills?: unknown;
+        author?: unknown;
+      };
+      if (!Array.isArray(parsed.skills) || parsed.skills.length === 0) {
+        return false;
+      }
+      // skills 必须全部是目录路径，出现 .md 文件即为历史脏数据
+      const allDirs = parsed.skills.every(
+        (item) => typeof item === 'string' && !item.toLowerCase().endsWith('.md'),
+      );
+      if (!allDirs) return false;
+      // author 必须为对象结构
+      return typeof parsed.author === 'object' && parsed.author !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 生成带 YAML frontmatter 的标准 SKILL.md 内容
+   * Claude Code 要求技能文件头部声明 name 与 description，否则技能不会被加载
+   * @param slug 技能唯一标识 (用作 frontmatter name)
+   * @param name 技能中文/展示名
+   * @param description 技能描述
+   */
+  private buildSkillMarkdown(
+    slug: string,
+    name: string,
+    description: string,
+  ): string {
+    const safeDescription = (description || name).replace(/\r?\n/g, ' ').trim();
+    return [
+      '---',
+      `name: ${slug}`,
+      `description: ${safeDescription}`,
+      '---',
+      '',
+      `# ${name}`,
+      '',
+      safeDescription,
+      '',
+      '## 适用端',
+      '',
+      'Claude Code / Cursor / MCP',
+      '',
+    ].join('\n');
+  }
+
+  /**
+   * 推导 plugin.json 的 skills 字段 (必须为目录路径)
+   * 优先使用插件内已存在的 skills/ 目录；若技能文件位于插件根目录则返回 './'；
+   * 两者皆无时兜底生成 skills/SKILL.md 模板，保证插件一定可被安装
+   * @param pluginDir 插件工作目录绝对路径
+   * @param cleanSlug 规范化后的插件标识
+   * @param skill 技能元数据
+   */
+  private resolveSkillsField(
+    pluginDir: string,
+    cleanSlug: string,
+    skill: { name: string; description: string },
+  ): string[] {
+    const skillsSubDir = path.join(pluginDir, 'skills');
+    const hasSkillsDirEntry =
+      fs.existsSync(skillsSubDir) &&
+      fs.statSync(skillsSubDir).isDirectory() &&
+      this.containsSkillFile(skillsSubDir);
+    if (hasSkillsDirEntry) {
+      return ['./skills'];
+    }
+
+    // ZIP 包可能把 SKILL.md 直接放在插件根目录，此时 skills 指向 './'
+    if (fs.existsSync(path.join(pluginDir, 'SKILL.md'))) {
+      return ['./'];
+    }
+
+    // 兜底：补齐标准模板，避免生成无法安装的空插件
+    if (!fs.existsSync(skillsSubDir)) {
+      fs.mkdirSync(skillsSubDir, { recursive: true });
+    }
+    fs.writeFileSync(
+      path.join(skillsSubDir, 'SKILL.md'),
+      this.buildSkillMarkdown(cleanSlug, skill.name, skill.description),
+      'utf-8',
+    );
+    return ['./skills'];
+  }
+
+  /**
+   * 判断目录内 (含一级子目录) 是否存在 SKILL.md 技能定义文件
+   * @param dir 待检查目录
+   */
+  private containsSkillFile(dir: string): boolean {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    if (entries.some((e) => e.isFile() && e.name === 'SKILL.md')) {
+      return true;
+    }
+    return entries.some(
+      (e) =>
+        e.isDirectory() &&
+        fs.existsSync(path.join(dir, e.name, 'SKILL.md')),
+    );
   }
 
   /**
@@ -262,8 +430,9 @@ export class GitMarketService implements OnModuleInit {
     const validSlugs = new Set<string>();
 
     // 1. 依据在线技能重建 plugins 数组
+    manifest.owner = manifest.owner ?? { ...MARKETPLACE_META.owner };
     manifest.plugins = approvedSkills.map((skill) => {
-      const cleanSlug = skill.slug.replace('@', '').replace('/', '-');
+      const cleanSlug = toPluginName(skill.slug);
       validSlugs.add(cleanSlug);
       return {
         name: cleanSlug,
@@ -271,7 +440,7 @@ export class GitMarketService implements OnModuleInit {
         version: skill.version || 'v1.0.0',
         source: `./plugins/${cleanSlug}`,
         category: skill.category,
-        author: skill.author,
+        author: skill.author ? { name: skill.author } : undefined,
       };
     });
 

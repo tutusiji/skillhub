@@ -7,7 +7,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
 import { SkillEntity } from '../../database/entities/skill.entity';
-import { GitMarketService } from '../git-market/git-market.service';
+import {
+  GitMarketService,
+  toPluginName,
+} from '../git-market/git-market.service';
 import { AuditService } from '../audit/audit.service';
 import JSZip from 'jszip';
 
@@ -37,6 +40,15 @@ export class SkillsService implements OnModuleInit {
    */
   async onModuleInit() {
     const count = await this.skillRepository.count();
+
+    // 数据库已有技能时，仍需校验 Git 市场索引是否与之一致：
+    // storage/git-marketplace 是可重建的运行时数据，一旦被清理或损坏，
+    // 已上架技能会从 marketplace.json 消失导致客户端装不到，此处启动即自愈
+    if (count > 0) {
+      await this.reconcileGitMarketOnBoot();
+      return;
+    }
+
     if (count === 0) {
       const presetSkills: Partial<SkillEntity>[] = [
         {
@@ -491,6 +503,42 @@ export class SkillsService implements OnModuleInit {
     await this.skillRepository.remove(skill);
     await this.rebuildGitMarketIndex();
     return { success: true, id };
+  }
+
+  /**
+   * 启动时对齐 Git 市场与数据库：把所有已上架技能重新写入插件仓库
+   * 覆盖 storage/git-marketplace 被删除/损坏，或历史清单缺少 owner 字段的场景
+   */
+  private async reconcileGitMarketOnBoot(): Promise<void> {
+    const approved = await this.skillRepository.find({
+      where: { status: 'approved' },
+    });
+    if (approved.length === 0) return;
+
+    const manifest = this.gitMarketService.getMarketplaceManifest();
+    const indexed = new Set(manifest.plugins.map((p) => p.name));
+    // 除了清单缺条目，还要检查插件目录结构是否符合最新 Claude Code schema
+    const missing = approved.filter((skill) => {
+      const cleanSlug = toPluginName(skill.slug);
+      if (!indexed.has(cleanSlug)) return true;
+      return !this.gitMarketService.isPluginLayoutValid(cleanSlug);
+    });
+
+    if (missing.length === 0) return;
+
+    for (const skill of missing) {
+      await this.gitMarketService.syncApprovedSkillToGit(
+        skill,
+        undefined,
+        skill.version,
+      );
+    }
+    // 补齐后再全量重建一次索引，剔除历史命名残留的插件目录与清单条目
+    await this.rebuildGitMarketIndex();
+
+    console.log(
+      `🔧 Git 市场索引已自愈：修复/补齐 ${missing.length} 个已上架插件 (共 ${approved.length} 个在线)`,
+    );
   }
 
   /**
