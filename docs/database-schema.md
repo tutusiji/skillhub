@@ -1,11 +1,7 @@
 # SkillHub 数据库架构文档
 
-SkillHub 后端使用 **TypeORM** 做对象关系映射，数据库层支持双模式：
-
-| 模式 | 触发条件 | 说明 |
-| --- | --- | --- |
-| SQLite | 默认（未设任何 DB 变量） | 库文件 `server/storage/skillhub.sqlite`，零配置，适合本地开发与单机演示 |
-| PostgreSQL | `DB_TYPE=postgres` 或设置 `DATABASE_URL` | 生产级部署，由 `server/.env` 控制连接参数 |
+SkillHub 后端使用 **TypeORM** 做对象关系映射，数据库统一使用 **PostgreSQL**（SQLite 支持已移除），
+连接由 `server/.env` 的 `DB_*` 变量或 `DATABASE_URL` 控制。
 
 `synchronize: true` 当前对两种模式都开启，即启动时按实体自动建表/改表。**生产环境改实体定义前请先备份**。
 
@@ -26,10 +22,9 @@ SkillHub 后端使用 **TypeORM** 做对象关系映射，数据库层支持双�
 | `ExpertDomainEntity` | `expert_domains` | varchar（业务 ID） | 岗位专家组配置（技能归属标签，可增删改查） |
 
 > ⚠️ **uuid 主键契约**：`users` / `audit_reports` / `skill_demands` 的主键是真正的 uuid 列。
-> SQLite 把 uuid 存成普通字符串，任意值都能查；PostgreSQL 下用非法格式查询会抛
-> `invalid input syntax for type uuid` 并冒泡成 500。**凡是用外部传入 id 查这些表的代码，
-> 必须经 `server/src/common/db-id.util.ts` 的 `isUuid` / `findByUuid` 校验**（非法 id 返回 null/404）。
-> 已有回归断言覆盖该契约（分组 9）。
+> PostgreSQL 的 uuid 列对非法格式字符串查询会抛 `invalid input syntax for type uuid` 并冒泡成 500。
+> **凡是用外部传入 id 查这些表的代码，必须经 `server/src/common/db-id.util.ts` 的 `isUuid` / `findByUuid`
+> 校验**（非法 id 返回 null/404）。已有回归断言覆盖该契约（分组 9）。
 
 ---
 
@@ -189,13 +184,9 @@ SkillHub 后端使用 **TypeORM** 做对象关系映射，数据库层支持双�
 
 ---
 
-## 双模式差异速查
+## 部署说明
 
-| 差异点 | SQLite | PostgreSQL |
-| --- | --- | --- |
-| uuid 主键 | 存为字符串，任意值可查 | 真 uuid 类型，非法格式抛错（须走 `isUuid`） |
-| simple-json | 落为 JSON 文本 | 落为 JSON 文本（不是 JSONB 列） |
-| 并发写 | 全局串行，多进程写会 `SQLITE_BUSY` | 行级并发，适合多人部署 |
-| 部署形态 | 单文件，随服务生成 | 独立服务，`server/.env` 配置连接 |
-
-SQLite → PostgreSQL 数据迁移见 `scripts/migrate-sqlite-to-pg.mjs`（幂等，按主键跳过已存在记录）。
+- 连接参数见 `server/.env`（`DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME`，
+  或 `DATABASE_URL` 一次性指定，优先级更高）。
+- `synchronize: true` 会在启动时按实体自动建表/改表，**生产环境的表结构变更请先备份**。
+- `simple-json` 列在 PostgreSQL 中落为 JSON 文本（不是 JSONB 列）。

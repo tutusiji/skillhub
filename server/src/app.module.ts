@@ -16,12 +16,23 @@ import { ExpertDomainModule } from './modules/expert-domains/expert-domain.modul
 /**
  * SkillHub 应用程序根模块
  * 汇聚数据库持久化、Git 插件市场、技能管理、双引擎风控及企业鉴权等核心业务子模块
+ *
+ * 环境配置加载顺序（后者覆盖前者）：
+ *   1. 通用 .env（提交的本地开发默认值）
+ *   2. .env.local（本机覆盖，不入库）
+ *   3. .env.<APP_ENV>（按环境加载，如 .env.test / .env.prod，不入库）
+ * APP_ENV 取值：dev / test / prod，默认 dev
  */
+function resolveEnvFiles(): string[] {
+  const appEnv = process.env.APP_ENV || process.env.NODE_ENV || 'dev';
+  return ['.env', '.env.local', `.env.${appEnv}`];
+}
+
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['.env.local', '.env'],
+      envFilePath: resolveEnvFiles(),
     }),
     DatabaseModule,
     AuthModule,

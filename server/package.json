@@ -1,7 +1,7 @@
 {
   "name": "skillhub-server",
   "version": "1.0.0",
-  "description": "SkillHub 企业级 AI 技能与插件市场 NestJS 后端服务",
+  "description": "SkillHub \u4f01\u4e1a\u7ea7 AI \u6280\u80fd\u4e0e\u63d2\u4ef6\u5e02\u573a NestJS \u540e\u7aef\u670d\u52a1",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
@@ -31,7 +31,6 @@
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "sqlite3": "^5.1.7",
     "typeorm": "^0.3.20",
     "uuid": "^10.0.0"
   },

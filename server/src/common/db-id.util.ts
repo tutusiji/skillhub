@@ -1,9 +1,9 @@
 /**
  * 数据库主键格式防御工具
  *
- * 背景：SQLite 把 `@PrimaryGeneratedColumn('uuid')` 存成普通 varchar，任意字符串都能安全查询；
- * 切到 PostgreSQL 后该列是真正的 `uuid` 类型，用非法格式的字符串查询会让驱动直接抛
- * `QueryFailedError: invalid input syntax for type uuid`，冒泡成 500。
+ * 背景：PostgreSQL 的 `@PrimaryGeneratedColumn('uuid')` 列是真正的 `uuid` 类型，
+ * 用非法格式的字符串查询会让驱动直接抛 `QueryFailedError: invalid input syntax for type uuid`，
+ * 冒泡成 500。
  * 因此所有「用外部传入的 id 查 uuid 主键」的位置都必须先过一次格式校验，
  * 把「查不到」和「格式非法」统一收敛成业务语义上的 404 / null。
  */

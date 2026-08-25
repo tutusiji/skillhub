@@ -7,4 +7,3 @@ allowBuilds:
   '@nestjs/core': true
   'esbuild': true
   'protobufjs': true
-  sqlite3: true

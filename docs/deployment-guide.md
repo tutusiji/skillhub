@@ -21,11 +21,11 @@ SkillHub 是**单进程应用**：NestJS 后端同时提供 API、Claude Code �
    └── 其余 GET             前端 SPA（dist/）
         │
         ▼
-   PostgreSQL(:5432)  +  server/storage/（git-marketplace 工作树、可选 SQLite）
+   PostgreSQL(:5432)  +  server/storage/（git-marketplace 工作树）
 ```
 
 - 对外只需暴露一个端口（默认 `3001`）。
-- 数据分两类：**数据库**（PostgreSQL 或 SQLite）与 **storage 目录**（Git 市场仓库，启动时自愈重建）。
+- 数据分两类：**数据库**（PostgreSQL）与 **storage 目录**（Git 市场仓库，启动时自愈重建）。
 - 依赖系统 `git` 二进制（Git Smart HTTP 用 `spawn('git', ['upload-pack', ...])`）。
 
 ---
@@ -37,7 +37,7 @@ SkillHub 是**单进程应用**：NestJS 后端同时提供 API、Claude Code �
 | Node.js | ≥ 20（实测 22.x） | 后端使用全局 `fetch` |
 | pnpm | ≥ 9 | pnpm workspace，勿用 npm/yarn |
 | git | 任意近期版本 | 插件市场协议必需 |
-| PostgreSQL | 可选，14+ | 不装则用内置 SQLite（单机演示） |
+| PostgreSQL | 14+（必需） | 唯一数据库，连接见第 5 节 |
 | Docker / K8s | 可选 | 按部署方式选择 |
 
 ---
@@ -62,7 +62,6 @@ pnpm run server:build   # 后端 → server/dist/
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `PORT` | `3001` | 服务监听端口 |
-| `DB_TYPE` | `sqlite` | `postgres` 切换 PostgreSQL |
 | `DB_HOST` / `DB_PORT` | `localhost` / `5432` | PostgreSQL 连接 |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | `postgres`/`postgres`/`skillhub` | 同上 |
 | `DATABASE_URL` | 空 | 设置后优先，自动按 Postgres 连接 |
@@ -77,10 +76,9 @@ pnpm run server:build   # 后端 → server/dist/
 
 ## 5. 数据库
 
-### 5.1 选择
+### 5.1 说明
 
-- **SQLite（默认）**：`server/storage/skillhub.sqlite`，零配置。适合单机演示、低并发。
-- **PostgreSQL（推荐生产）**：多人并发、行级锁、可用 `pg_dump` 备份。
+数据库统一使用 **PostgreSQL**。启动时按实体自动建表（`synchronize: true`），无需手工建表；只须先创建数据库与用户。
 
 ### 5.2 初始化 PostgreSQL
 
@@ -105,26 +103,42 @@ DB_NAME=skillhub
 > ⚠️ `synchronize: true` 会按实体自动建表/改表。生产环境的表结构变更请先备份；
 > 追求更严格的生产管理可关闭 `synchronize` 改用显式迁移（见 `docs/database-schema.md`）。
 
-### 5.3 SQLite → PostgreSQL 迁移
+### 5.3 多环境数据库配置（内网 dev / test / prod）
 
-已有 SQLite 数据（`server/storage/skillhub.sqlite`）要迁到 PostgreSQL：
+内网通常有多套 PostgreSQL。连接配置按 `APP_ENV` 分层加载（文件在 `server/` 下）：
+
+| 文件 | 用途 | 入库？ |
+| --- | --- | --- |
+| `.env` | 通用默认（开发环境），已提交 | ✅ |
+| `.env.local` | 本机覆盖 | ❌ |
+| `.env.<APP_ENV>` | 按环境（`.env.test` / `.env.prod`） | ❌（含内网真实地址，勿提交） |
+
+加载顺序（后者覆盖前者）：`.env` → `.env.local` → `.env.<APP_ENV>`。启动时用 `APP_ENV` 选择：
 
 ```bash
-# 1. 停止后端（避免迁移期间写入冲突）
-systemctl --user stop skillhub-server    # 或停掉 dev 进程
+# 开发
+APP_ENV=dev pnpm run server:start
 
-# 2. 先启动一次后端让 PG 完成建表（synchronize），再停止
-PORT=3001 node server/dist/main & sleep 10; kill %1
+# 测试：连接测试环境 PG（地址写在 server/.env.test）
+APP_ENV=test pnpm run server:start
 
-# 3. 执行一次性迁移脚本（幂等：按主键跳过已存在记录，可重复执行）
-node scripts/migrate-sqlite-to-pg.mjs
-
-# 4. 配置 DB_TYPE=postgres 后启动
-systemctl --user start skillhub-server
+# 生产：连接生产环境 PG（地址写在 server/.env.prod）
+APP_ENV=prod pnpm run server:start
 ```
 
-脚本覆盖 `users / skills / audit_rules / audit_reports / skill_demands / llm_configs` 六张表，
-JSON 列原样透传。
+示例 `server/.env.prod`：
+
+```bash
+APP_ENV=prod
+DB_HOST=pg-prod.internal.corp
+DB_PORT=5432
+DB_USER=skillhub
+DB_PASSWORD=生产密码仅在此文件
+DB_NAME=skillhub
+# 或 DATABASE_URL=postgres://skillhub:生产密码@pg-prod.internal.corp:5432/skillhub
+```
+
+systemd / Docker / K8s 中同样注入 `APP_ENV` 即可切换（K8s 用 ConfigMap 的 `data` 字段，Secret 管密码）。
 
 ---
 
@@ -165,7 +179,7 @@ loginctl show-user "$USER" | grep Linger   # 必须 Linger=yes
 ```dockerfile
 # ---- 构建阶段 ----
 FROM node:22-bookworm-slim AS build
-# git-market 需要系统 git；sqlite3/pg 原生模块需要编译工具链
+# git-market 需要系统 git；pg 原生模块需要编译工具链
 RUN apt-get update && apt-get install -y git python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
@@ -518,7 +532,7 @@ pg_dump -h 127.0.0.1 -U skillhub skillhub -F c -f /backup/skillhub-$(date +%F).d
 tar czf /backup/git-marketplace-$(date +%F).tgz server/storage/git-marketplace
 ```
 
-> `server/storage/` 可整体重建（git-marketplace 启动自愈；SQLite 文件丢失则需迁移/重新播种），
+> `server/storage/` 可整体重建（git-marketplace 启动自愈），
 > 数据库才是业务数据权威。
 
 ### 升级

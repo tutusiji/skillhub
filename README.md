@@ -38,7 +38,7 @@
                                │
 ┌──────────────────────────────▼──────────────────────────────┐
 │                      数据与存储层 (Storage)                  │
-│  SQLite (默认) / PostgreSQL   │   内置 Git 市场仓库 / ZIP 池 │
+│        PostgreSQL             │   内置 Git 市场仓库 / ZIP 池 │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -53,7 +53,7 @@
 | Node.js | ≥ 20（实测 22.22.3） | 后端用到全局 `fetch`，请勿低于 18 |
 | pnpm | ≥ 9（实测 11.3.0） | 本仓库是 pnpm workspace，不要用 npm/yarn 安装 |
 | git | 任意近期版本 | 插件市场的 `git-upload-pack` 会调用系统 `git` 二进制 |
-| PostgreSQL | 可选，14+ | 不装也能跑，默认用内置 SQLite |
+| PostgreSQL | 14+（必需） | 唯一数据库，见「数据库」章节 |
 
 ### 1. 安装依赖
 
@@ -63,7 +63,7 @@ pnpm install
 
 根目录和 `server/` 都是 workspace 成员（见 `pnpm-workspace.yaml`），**一条命令会同时装好前后端**，不需要再 `cd server && pnpm install`。
 
-后端依赖含原生模块（`sqlite3`、`pg`、`esbuild`），已在 `pnpm-workspace.yaml` 的 `allowBuilds` 中放行，首次安装会编译，耗时略长。
+后端依赖含原生模块（`pg`、`esbuild`），已在 `pnpm-workspace.yaml` 的 `allowBuilds` 中放行，首次安装会编译，耗时略长。
 
 ### 2. 配置环境变量
 
@@ -79,12 +79,12 @@ pnpm install
 echo 'VITE_API_BASE_URL=""' > .env
 ```
 
-`server/.env` 不创建也能启动（默认 SQLite + 语义引擎降级为本地启发式规则）。需要时按下表补：
+`server/.env` 需配置 PostgreSQL 连接（见「数据库」章节）；LLM 三项留空时语义引擎降级为本地启发式规则。按需补：
 
 | 变量 | 默认值 | 作用 |
 | --- | --- | --- |
+| `APP_ENV` | `dev` | 环境标识（dev/test/prod），决定加载 `server/.env.<APP_ENV>` 覆盖配置 |
 | `PORT` | `3001` | 后端监听端口 |
-| `DB_TYPE` | `sqlite` | 设为 `postgres` 切换数据库 |
 | `DB_HOST` / `DB_PORT` | `localhost` / `5432` | 仅 Postgres 模式生效 |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | `postgres` / `postgres` / `skillhub` | 仅 Postgres 模式生效 |
 | `DATABASE_URL` | 空 | 填了就优先于上面几项，且自动按 Postgres 连接 |
@@ -202,14 +202,11 @@ pnpm run server:start   # 以生产模式跑后端 (node dist/main)
 
 `server/src/database/database.module.ts` 同时支持两种数据库，靠环境变量切换，实体定义共用：
 
-- **SQLite（默认）**：库文件落在 `server/storage/skillhub.sqlite`，零配置、适合本地开发与单人演示。
-- **PostgreSQL**：设 `DB_TYPE=postgres` 或 `DATABASE_URL` 后生效，适合多人并发的正式部署。
+数据库统一使用 **PostgreSQL**。先建库，再在 `server/.env` 配置连接：
 
 ```bash
-# 切到本机 PostgreSQL
 createdb skillhub
 cat >> server/.env <<'EOF'
-DB_TYPE=postgres
 DB_HOST=127.0.0.1
 DB_PORT=5432
 DB_USER=your_pg_user
@@ -218,19 +215,15 @@ DB_NAME=skillhub
 EOF
 ```
 
-已有 SQLite 数据要带到 Postgres，用一次性迁移脚本（**需先停后端**，且目标库已由后端启动一次完成建表）：
+连接参数也可用 `DATABASE_URL` 一次性指定（优先级更高）。
 
-```bash
-systemctl --user stop skillhub-server   # 或直接停掉 server:dev
-node scripts/migrate-sqlite-to-pg.mjs
-```
-
-脚本按主键幂等跳过已存在记录，可重复执行。
+内网 dev / test / prod 通常各有一套 PostgreSQL：把各环境的连接写入 `server/.env.test` / `server/.env.prod`
+（不入库），启动时用 `APP_ENV` 切换即可（详见 [`docs/deployment-guide.md`](docs/deployment-guide.md) 第 5.3 节）。
 
 两点注意：
 
 1. `synchronize: true` 目前对两种数据库都开着 —— 改实体定义会让 TypeORM 自动改表结构，**生产环境的表结构变更请先备份**。
-2. `server/storage/` 全是运行时数据（SQLite 库文件 + Git 市场仓库），已被 gitignore，由启动流程自动重建，不要提交或手工编辑。删掉 `server/storage/git-marketplace` 是安全的，下次启动会自愈。
+2. `server/storage/` 全是运行时数据（Git 市场仓库），已被 gitignore，由启动流程自动重建，不要提交或手工编辑。删掉 `server/storage/git-marketplace` 是安全的，下次启动会自愈。
 
 ---
 
@@ -243,7 +236,7 @@ pnpm run build && pnpm run server:build
 pnpm run server:start          # 或用 systemd 常驻
 ```
 
-内网部署支持四种方式，完整指南（数据库初始化与 SQLite→PG 迁移、systemd、Docker / docker-compose、Kubernetes、内网域名与 frp/HTTPS 接入、备份升级）见：
+内网部署支持四种方式，完整指南（数据库初始化、systemd、Docker / docker-compose、Kubernetes、内网域名与 frp/HTTPS 接入、备份升级）见：
 **[`docs/deployment-guide.md`](docs/deployment-guide.md)**。systemd 用户服务与 frp 简版见 [`deploy/README.md`](deploy/README.md)。
 
 要点：对外入口指向后端 **3001**（不是 Vite 的 7001）；安装指令中的市场地址随访问域名动态生成。
@@ -260,7 +253,7 @@ pnpm run server:start          # 或用 systemd 常驻
 | 页面状态错乱 / 想清空本地数据 | 业务数据全部以数据库为准，本地仅存登录令牌。`src/main.tsx` 的 ErrorBoundary 提供「重置缓存并恢复」，会清掉本地会话令牌与历史残留键并刷新（退出登录、回到访客态） |
 | 超管账号提示密码不对 | 首次启动后超管初始密码为 `skill@2026`；若数据库里已存在同名账号，`onModuleInit` 会把它校正为超管并重置为初始密码。改过密码后不要乱删 `users` 表 |
 | OSS 登录提示工号无效 | 未配置 `IAM_BASE_URL` 时桩实现只接受 7 位数字工号；配置后校验逻辑看 `server/src/modules/auth/oss-iam.service.ts` |
-| `pnpm install` 卡在原生模块编译 | `sqlite3` / `pg` / `esbuild` 需要本地编译，属正常耗时；缺编译工具链时装一下 `build-essential`、`python3` |
+| `pnpm install` 卡在原生模块编译 | `pg` / `esbuild` 需要本地编译，属正常耗时；缺编译工具链时装一下 `build-essential`、`python3` |
 | 审核报告里语义引擎结论是 `heuristic` | 未配 LLM 凭据或调用失败，已按设计降级。查 `llmVerdict.degradedReason`，或到「风控中心 → 大模型网关」做连通性测试 |
 | 后端日志报 `invalid input syntax for type uuid` | Postgres 下用非法格式 id 查 uuid 主键。新增此类查询请走 `server/src/common/db-id.util.ts` 的 `isUuid` / `findByUuid` |
 
@@ -320,7 +313,7 @@ gemini-skillhub/
 │   │   └── main.ts         # 服务入口与全局配置
 │   └── package.json
 ├── docs/                   # 架构文档（database-schema.md 等）
-├── scripts/                # 回归测试、SQLite→PG 迁移等脚本
+├── scripts/                # 回归测试等脚本
 ├── package.json            # 前端工程配置
 └── tsconfig.json
 ```

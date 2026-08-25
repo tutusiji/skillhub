@@ -1,8 +1,6 @@
 import { Module, Global } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import * as path from 'path';
-import * as fs from 'fs';
 import { UserEntity } from './entities/user.entity';
 import { SkillEntity } from './entities/skill.entity';
 import { AuditRuleEntity } from './entities/audit-rule.entity';
@@ -15,7 +13,7 @@ import { ExpertDomainEntity } from './entities/expert-domain.entity';
 
 /**
  * 数据库连接与 ORM 配置模块
- * 支持 SQLite 本地开箱即用存储与 PostgreSQL 生产环境变量配置无缝切换
+ * 统一使用 PostgreSQL（生产级），通过 DB_* 环境变量或 DATABASE_URL 连接
  */
 @Global()
 @Module({
@@ -24,13 +22,6 @@ import { ExpertDomainEntity } from './entities/expert-domain.entity';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
-        const dbType = configService.get<string>('DB_TYPE', 'sqlite');
-        const storageDir = path.resolve(process.cwd(), 'storage');
-
-        if (!fs.existsSync(storageDir)) {
-          fs.mkdirSync(storageDir, { recursive: true });
-        }
-
         const entities = [
           UserEntity,
           SkillEntity,
@@ -43,28 +34,16 @@ import { ExpertDomainEntity } from './entities/expert-domain.entity';
           ExpertDomainEntity,
         ];
 
-        if (dbType === 'postgres' || configService.get<string>('DATABASE_URL')) {
-          return {
-            type: 'postgres',
-            url: configService.get<string>('DATABASE_URL'),
-            host: configService.get<string>('DB_HOST', 'localhost'),
-            port: configService.get<number>('DB_PORT', 5432),
-            username: configService.get<string>('DB_USER', 'postgres'),
-            password: configService.get<string>('DB_PASSWORD', 'postgres'),
-            database: configService.get<string>('DB_NAME', 'skillhub'),
-            entities,
-            synchronize: true, // 自动同步表结构
-            logging: false,
-          };
-        }
-
-        // 默认采用本地 SQLite 持久化数据库
-        const dbPath = path.join(storageDir, 'skillhub.sqlite');
         return {
-          type: 'sqlite',
-          database: dbPath,
+          type: 'postgres',
+          url: configService.get<string>('DATABASE_URL') || undefined,
+          host: configService.get<string>('DB_HOST', 'localhost'),
+          port: configService.get<number>('DB_PORT', 5432),
+          username: configService.get<string>('DB_USER', 'postgres'),
+          password: configService.get<string>('DB_PASSWORD', 'postgres'),
+          database: configService.get<string>('DB_NAME', 'skillhub'),
           entities,
-          synchronize: true, // 自动生成并迁移数据表
+          synchronize: true, // 自动同步表结构
           logging: false,
         };
       },

@@ -770,7 +770,7 @@ async function startMockLlmGateway() {
 /**
  * 分组九：主键格式健壮性（PostgreSQL uuid 列契约）
  *
- * SQLite 把 uuid 主键存成 varchar，任意字符串都能安全查询；切到 PostgreSQL 后
+ * PostgreSQL 的 uuid 主键列对非法格式的字符串查询会抛错；
  * 该列是真正的 uuid 类型，非法格式的 id 会让驱动抛 QueryFailedError 并冒泡成 500。
  * 这里逐个覆盖所有「外部可传入 id」的接口，确保它们返回业务语义状态码而非 500。
  */
