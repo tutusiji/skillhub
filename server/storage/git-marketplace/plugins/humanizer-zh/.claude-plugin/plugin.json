@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "humanizer-zh",
+  "version": "v1.0.0",
+  "description": "去 AI 味神器 — 将生硬的 AI 表达（如「综上所述」「值得注意的是」）转换为更自然的「人话」，让文案更接地气。适合内容审核和文案团队。",
+  "author": {
+    "name": "导入",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

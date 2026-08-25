@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "hol-guard",
+  "version": "v1.0.0",
+  "description": "AI 防病毒层 — 在 Claude Code 执行工具前扫描插件、skills、MCP server 中的恶意行为。内网安装第三方插件时的安全闸门，保护 Agent 免受供应链攻击。",
+  "author": {
+    "name": "导入",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

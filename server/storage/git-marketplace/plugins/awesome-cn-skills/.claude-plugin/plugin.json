@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "awesome-cn-skills",
+  "version": "v1.0.0",
+  "description": "中文社区精选技能集 — 代码审查、API 设计、前端开发、数据库优化等场景化技能。中文文档，按场景分类，适合国内团队快速上手。",
+  "author": {
+    "name": "导入",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

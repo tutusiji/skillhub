@@ -4,11 +4,17 @@ dist/
 coverage/
 .DS_Store
 *.log
+
+# 环境变量：默认忽略，但仓库自带的最小配置（无真实密钥）需要入库
 .env*
 !.env.example
+!.env
+!server/.env
 
-# Runtime data (SQLite DB + git marketplace repo, regenerated on server startup)
-server/storage/
+# 运行时数据：SQLite 库文件忽略；Git 市场插件内容需要入库（内部 .git 元数据除外）
+server/storage/*
+!server/storage/git-marketplace/
+server/storage/git-marketplace/.git/
 
 # ZCode agent runtime data
 .zcode/

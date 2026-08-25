@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "git-commit-pro",
+  "version": "v1.0.0",
+  "description": "Git 提交规范助手 — 自动生成符合 Conventional Commits 规范的中文提交信息，分析代码变更智能生成提交描述，支持多类型提交和范围标记。提交代码前使用。",
+  "author": {
+    "name": "导入",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

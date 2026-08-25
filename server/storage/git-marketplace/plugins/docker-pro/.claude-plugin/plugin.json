@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "docker-pro",
+  "version": "v1.0.0",
+  "description": "Docker 全流程助手 — Dockerfile 编写规范、镜像优化、Compose 编排、容器调试。编写 Dockerfile、优化镜像大小或编排多容器服务时使用。",
+  "author": {
+    "name": "导入",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

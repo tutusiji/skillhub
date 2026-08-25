@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "cc-skills-golang",
+  "version": "v1.0.0",
+  "description": "Go 语言专项技能集 — Go 编码规范、测试模式、并发最佳实践、错误处理、性能优化。专为 Go 团队打造。",
+  "author": {
+    "name": "导入",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

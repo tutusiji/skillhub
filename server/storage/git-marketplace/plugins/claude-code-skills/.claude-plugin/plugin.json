@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "claude-code-skills",
+  "version": "v1.0.0",
+  "description": "全交付生命周期工具集 — Agile 流水线、多模型 AI 代码审查、项目脚手架、文档生成、代码审计、性能优化。自带 MCP servers。",
+  "author": {
+    "name": "导入",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

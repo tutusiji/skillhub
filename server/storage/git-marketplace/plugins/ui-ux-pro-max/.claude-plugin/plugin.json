@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "ui-ux-pro-max",
+  "version": "v1.0.0",
+  "description": "UI UX Pro Max",
+  "author": {
+    "name": "系统安全超管",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

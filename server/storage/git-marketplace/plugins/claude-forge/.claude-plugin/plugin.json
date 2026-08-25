@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "claude-forge",
+  "version": "v1.0.0",
+  "description": "Claude Code 增强框架 — 11 个 AI 子代理、36 个 slash 命令、15 个技能。覆盖规划、编码、审查、测试、部署全流程。适合需要大量快捷命令的团队。",
+  "author": {
+    "name": "导入",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

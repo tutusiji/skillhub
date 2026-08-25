@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "security-audit",
+  "version": "v1.0.0",
+  "description": "代码安全深度审计 — OWASP Top 10 漏洞扫描、依赖 CVE 检测、硬编码密钥排查、合规性检查。上线前安全评估或定期安全巡检时使用。",
+  "author": {
+    "name": "导入",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

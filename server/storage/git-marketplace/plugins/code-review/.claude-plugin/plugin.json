@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "code-review",
+  "version": "v1.0.0",
+  "description": "代码质量守护神 — 多 Agent 并行审查代码，查找 Bug、安全漏洞并优化规范，减少出错率。比单次审查覆盖面更广、深度更深。",
+  "author": {
+    "name": "导入",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

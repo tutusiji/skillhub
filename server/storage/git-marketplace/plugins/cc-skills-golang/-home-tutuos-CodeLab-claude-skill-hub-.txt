@@ -1,0 +1,1 @@
+/home/tutuos/CodeLab/claude-skill-hub/plugins

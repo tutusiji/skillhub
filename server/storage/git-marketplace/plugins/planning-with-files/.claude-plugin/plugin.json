@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "planning-with-files",
+  "version": "v1.0.0",
+  "description": "大项目救星 — 持久化项目规划，跨会话不丢失上下文，适合碎片化时间开发。将需求拆解为可跟踪的文件化任务清单。",
+  "author": {
+    "name": "导入",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

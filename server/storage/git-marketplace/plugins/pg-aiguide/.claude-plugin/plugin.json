@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "pg-aiguide",
+  "version": "v1.0.0",
+  "description": "PostgreSQL 开发助手 — 帮助 AI 生成更优 SQL、索引建议、查询优化、性能调优。MCP server + Claude plugin，适合后端团队。",
+  "author": {
+    "name": "导入",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

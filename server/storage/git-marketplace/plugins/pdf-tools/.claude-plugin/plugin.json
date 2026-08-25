@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "pdf-tools",
+  "version": "v1.0.0",
+  "description": "PDF 文档处理神器 — 直接读取、合并、拆分 PDF，支持 OCR 扫描件识别，无需切换软件。适合文档密集型团队。",
+  "author": {
+    "name": "导入",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

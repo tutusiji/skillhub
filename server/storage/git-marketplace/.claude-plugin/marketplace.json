@@ -1,0 +1,281 @@
+{
+  "name": "skillhub",
+  "owner": {
+    "name": "SkillHub 企业管理员",
+    "email": "admin@skillhub.corp"
+  },
+  "description": "SkillHub 企业内网私有 AI 技能与插件集市",
+  "version": "1.0.0",
+  "plugins": [
+    {
+      "name": "superpowers",
+      "description": "全能开发套件 — 项目规划、代码编写、Code Review 等全流程辅助，帮你系统化梳理需求和任务。TDD、调试、协作模式、规格驱动开发、子代理驱动实现。作者 Jesse Vincent (obra)。",
+      "version": "v1.0.0",
+      "source": "./plugins/superpowers",
+      "category": "productivity",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "socraticode",
+      "description": "企业级代码库智能分析 — 混合语义搜索、多语言依赖图、符号级影响分析与调用流追踪。零配置本地运行，号称减少 61% token 消耗、84% 调用次数。适合大型代码库。",
+      "version": "v1.0.0",
+      "source": "./plugins/socraticode",
+      "category": "coding",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "skill-creator",
+      "description": "压轴神器 — 让你自定义专属 Skill，将个人开发习惯和重复性工作封装成功能，彻底让 AI 适配你的需求。支持模板化创建、参数配置、自动注册。",
+      "version": "v1.0.0",
+      "source": "./plugins/skill-creator",
+      "category": "coding",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "security-audit",
+      "description": "代码安全深度审计 — OWASP Top 10 漏洞扫描、依赖 CVE 检测、硬编码密钥排查、合规性检查。上线前安全评估或定期安全巡检时使用。",
+      "version": "v1.0.0",
+      "source": "./plugins/security-audit",
+      "category": "security",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "planning-with-files",
+      "description": "大项目救星 — 持久化项目规划，跨会话不丢失上下文，适合碎片化时间开发。将需求拆解为可跟踪的文件化任务清单。",
+      "version": "v1.0.0",
+      "source": "./plugins/planning-with-files",
+      "category": "productivity",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "pg-aiguide",
+      "description": "PostgreSQL 开发助手 — 帮助 AI 生成更优 SQL、索引建议、查询优化、性能调优。MCP server + Claude plugin，适合后端团队。",
+      "version": "v1.0.0",
+      "source": "./plugins/pg-aiguide",
+      "category": "data",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "pdf-tools",
+      "description": "PDF 文档处理神器 — 直接读取、合并、拆分 PDF，支持 OCR 扫描件识别，无需切换软件。适合文档密集型团队。",
+      "version": "v1.0.0",
+      "source": "./plugins/pdf-tools",
+      "category": "productivity",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "humanizer-zh",
+      "description": "去 AI 味神器 — 将生硬的 AI 表达（如「综上所述」「值得注意的是」）转换为更自然的「人话」，让文案更接地气。适合内容审核和文案团队。",
+      "version": "v1.0.0",
+      "source": "./plugins/humanizer-zh",
+      "category": "productivity",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "hol-guard",
+      "description": "AI 防病毒层 — 在 Claude Code 执行工具前扫描插件、skills、MCP server 中的恶意行为。内网安装第三方插件时的安全闸门，保护 Agent 免受供应链攻击。",
+      "version": "v1.0.0",
+      "source": "./plugins/hol-guard",
+      "category": "security",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "hashicorp-skills",
+      "description": "HashiCorp 产品技能集 — Terraform 基础设施编排、Vault 密钥管理、Consul 服务发现、Nomad 调度。HashiCorp 官方出品。",
+      "version": "v1.0.0",
+      "source": "./plugins/hashicorp-skills",
+      "category": "devops",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "gstack",
+      "description": "Garry Tan 的 Claude Code 技能套件 — 覆盖 CEO 规划、工程审查、设计评审、QA、安全审计、发布工程的 23 个工具。将 Claude Code 变成虚拟工程团队。",
+      "version": "v1.0.0",
+      "source": "./plugins/gstack",
+      "category": "productivity",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "git-commit-pro",
+      "description": "Git 提交规范助手 — 自动生成符合 Conventional Commits 规范的中文提交信息，分析代码变更智能生成提交描述，支持多类型提交和范围标记。提交代码前使用。",
+      "version": "v1.0.0",
+      "source": "./plugins/git-commit-pro",
+      "category": "coding",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "frontend-design",
+      "description": "前端颜值救星 — 让 Claude 写出符合专业设计规范的前端代码，后端开发者也能做出好看的界面。内置色彩搭配、间距系统、响应式布局规范。",
+      "version": "v1.0.0",
+      "source": "./plugins/frontend-design",
+      "category": "coding",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "docker-pro",
+      "description": "Docker 全流程助手 — Dockerfile 编写规范、镜像优化、Compose 编排、容器调试。编写 Dockerfile、优化镜像大小或编排多容器服务时使用。",
+      "version": "v1.0.0",
+      "source": "./plugins/docker-pro",
+      "category": "devops",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "code-review-skill",
+      "description": "自动化代码审查 — 检查安全性、代码质量和最佳实践。审查 PR、审计代码或执行编码规范时使用。",
+      "version": "v1.0.0",
+      "source": "./plugins/code-review-skill",
+      "category": "coding",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "code-review",
+      "description": "代码质量守护神 — 多 Agent 并行审查代码，查找 Bug、安全漏洞并优化规范，减少出错率。比单次审查覆盖面更广、深度更深。",
+      "version": "v1.0.0",
+      "source": "./plugins/code-review",
+      "category": "coding",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "cn-docstring",
+      "description": "中文注释生成器 — 为函数、类、模块自动生成规范的中文文档注释。支持 Python docstring、JSDoc、Go doc、Java Javadoc 等多语言格式。写完代码后补充注释时使用。",
+      "version": "v1.0.0",
+      "source": "./plugins/cn-docstring",
+      "category": "coding",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "claude-workflow-v2",
+      "description": "通用工作流引擎 — 集成 agents、skills、hooks、commands 一体化。提供任务编排、多步骤自动化、事件驱动工作流。适合需要一站式增强的团队。",
+      "version": "v1.0.0",
+      "source": "./plugins/claude-workflow-v2",
+      "category": "productivity",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "claude-forge",
+      "description": "Claude Code 增强框架 — 11 个 AI 子代理、36 个 slash 命令、15 个技能。覆盖规划、编码、审查、测试、部署全流程。适合需要大量快捷命令的团队。",
+      "version": "v1.0.0",
+      "source": "./plugins/claude-forge",
+      "category": "productivity",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "claude-code-skills",
+      "description": "全交付生命周期工具集 — Agile 流水线、多模型 AI 代码审查、项目脚手架、文档生成、代码审计、性能优化。自带 MCP servers。",
+      "version": "v1.0.0",
+      "source": "./plugins/claude-code-skills",
+      "category": "productivity",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "cc-skills-golang",
+      "description": "Go 语言专项技能集 — Go 编码规范、测试模式、并发最佳实践、错误处理、性能优化。专为 Go 团队打造。",
+      "version": "v1.0.0",
+      "source": "./plugins/cc-skills-golang",
+      "category": "coding",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "aws-skills",
+      "description": "AWS 开发技能集 — CDK/SST 基础设施即代码、Serverless 部署、成本运维、Bedrock AgentCore。适合 AWS 技术栈团队。",
+      "version": "v1.0.0",
+      "source": "./plugins/aws-skills",
+      "category": "devops",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "awesome-cn-skills",
+      "description": "中文社区精选技能集 — 代码审查、API 设计、前端开发、数据库优化等场景化技能。中文文档，按场景分类，适合国内团队快速上手。",
+      "version": "v1.0.0",
+      "source": "./plugins/awesome-cn-skills",
+      "category": "productivity",
+      "author": {
+        "name": "导入"
+      }
+    },
+    {
+      "name": "ui-ux-pro-max",
+      "description": "UI UX Pro Max",
+      "version": "v1.0.0",
+      "source": "./plugins/ui-ux-pro-max",
+      "category": "coding",
+      "author": {
+        "name": "系统安全超管"
+      }
+    },
+    {
+      "name": "k8s-auto-ops-copilot",
+      "description": "实时监听 Kubernetes 集群事件，精准定位 CrashLoopBackOff 与 OOMKilled 异常根因。",
+      "version": "v2.1.0",
+      "source": "./plugins/k8s-auto-ops-copilot",
+      "category": "devops",
+      "author": {
+        "name": "张伟 (SRE专家)"
+      }
+    },
+    {
+      "name": "sql-diagnose-agent",
+      "description": "深度分析企业数据库 Slow Query 日志，自动评估缺失索引并生成 EXPLAIN 优化执行计划。",
+      "version": "v1.2.0",
+      "source": "./plugins/sql-diagnose-agent",
+      "category": "database",
+      "author": {
+        "name": "陈建国 (DBA架构师)"
+      }
+    },
+    {
+      "name": "git-commit-gen",
+      "description": "企业内网专属 AI 技能",
+      "version": "v1.0.0",
+      "source": "./plugins/git-commit-gen",
+      "category": "coding",
+      "author": {
+        "name": "对对对"
+      }
+    }
+  ]
+}

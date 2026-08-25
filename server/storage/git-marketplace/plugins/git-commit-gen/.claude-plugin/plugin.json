@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "git-commit-gen",
+  "version": "v1.0.0",
+  "description": "企业内网专属 AI 技能",
+  "author": {
+    "name": "对对对",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

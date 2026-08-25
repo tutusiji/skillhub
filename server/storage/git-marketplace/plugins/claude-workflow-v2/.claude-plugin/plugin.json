@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "claude-workflow-v2",
+  "version": "v1.0.0",
+  "description": "通用工作流引擎 — 集成 agents、skills、hooks、commands 一体化。提供任务编排、多步骤自动化、事件驱动工作流。适合需要一站式增强的团队。",
+  "author": {
+    "name": "导入",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./skills"
+  ]
+}
