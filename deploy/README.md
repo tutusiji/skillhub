@@ -1,4 +1,7 @@
-# SkillHub 部署说明
+# SkillHub 部署说明（systemd 简版）
+
+> 完整内网部署指南（数据库迁移 / Docker / Kubernetes / frp / HTTPS 反代 / 备份升级）见
+> [`docs/deployment-guide.md`](../docs/deployment-guide.md)。本文为 systemd 直接部署的速查。
 
 ## 单进程生产模式
 
@@ -91,7 +94,7 @@ remotePort = 17300
 部署或升级后建议跑一遍：
 
 ```bash
-pnpm run test:regression                          # 129 条 API 断言（默认 127.0.0.1:3001）
-pnpm run test:plugin-e2e                          # 21 条真实 claude CLI 插件安装断言
+pnpm run test:regression                          # API 回归断言（当前约 282 条，随市场插件数波动）
+pnpm run test:plugin-e2e                          # 165 条真实 claude CLI 插件安装断言
 node scripts/regression-test.mjs https://souxy.com:7300   # 顺带验证公网隧道
 ```

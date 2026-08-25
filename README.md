@@ -132,8 +132,10 @@ pnpm run dev
 
 - **权限设置**（仅超管）：委任管理员，并为每个管理员勾选「审核管理 / 风控中心」菜单权限，未勾选的菜单该用户登录后不可见。
 - **技能征集管理**：征集需求市场 + 管理员审核队列（普通用户仍可发布悬赏）。
-- **建议管理**：管理员查看全部员工建议并可删除；普通用户查看自己的建议并提交新建议。
+- **建议管理**（下拉菜单仅管理员；右下角「建议反馈」悬浮按钮全员可用）：管理员查看全部员工建议并可删除；普通用户查看自己的建议并提交新建议。
 - **分类和专家组管理**：管理员维护技能分类标签，并按岗位专家组为已上架技能打标（专家组即标签，一个技能可属于多个专家组）。
+
+> 所有页面右下角固定悬浮两个按钮：「建议反馈」（竖向文字，全员可见，点击进入建议反馈页）与「返回顶部」。
 
 几个开发期行为值得知道：
 
@@ -146,8 +148,8 @@ pnpm run dev
 
 ```bash
 pnpm run lint             # tsc --noEmit，本项目唯一的「lint」
-pnpm run test:regression  # 213 条 API 回归断言，需后端已在运行
-pnpm run test:plugin-e2e  # 调真实 claude CLI 走完市场添加→安装→卸载全链路；未装 claude 会跳过
+pnpm run test:regression  # API 回归断言（当前约 282 条，随市场插件数波动），需后端已在运行
+pnpm run test:plugin-e2e  # 调真实 claude CLI 走完市场添加→安装→卸载全链路（当前 165 条断言）；未装 claude 会跳过
 pnpm run test:all         # 上面三个串起来
 ```
 
@@ -241,7 +243,10 @@ pnpm run build && pnpm run server:build
 pnpm run server:start          # 或用 systemd 常驻
 ```
 
-完整的 systemd 用户服务安装、更新流程与 frp 对外映射见 [`deploy/README.md`](deploy/README.md)。要点：对外入口指向后端 **3001**，不是 Vite 的 7001。
+内网部署支持四种方式，完整指南（数据库初始化与 SQLite→PG 迁移、systemd、Docker / docker-compose、Kubernetes、内网域名与 frp/HTTPS 接入、备份升级）见：
+**[`docs/deployment-guide.md`](docs/deployment-guide.md)**。systemd 用户服务与 frp 简版见 [`deploy/README.md`](deploy/README.md)。
+
+要点：对外入口指向后端 **3001**（不是 Vite 的 7001）；安装指令中的市场地址随访问域名动态生成。
 
 ---
 
@@ -263,21 +268,29 @@ pnpm run server:start          # 或用 systemd 常驻
 
 ## 📖 Claude Code 插件市场使用指南
 
+> **市场地址是动态的**：`marketplace add` 的地址根据你当前访问的域名自动生成（`<当前访问地址>/skillhub.git`）。
+> 开发、测试、生产环境（如 `tech-dev.com:17200` / `tech-test.com:17200` / `tech.com:17200`）无需改代码，访问哪个环境就复制哪个地址。
+
 ### 第一步：在 Claude Code 中注册企业私有市场（仅需 1 次）
 ```bash
-/plugin marketplace add http://localhost:3001/skillhub.git
+/plugin marketplace add <你当前访问的地址>/skillhub.git
 ```
 
 ### 第二步：安装任意企业技能
 ```bash
 /plugin install sql-diagnose-agent@skillhub
-/plugin install k8s-auto-ops-copilot@skillhub
+/plugin install superpowers@skillhub
 ```
 
-### 第三步：拉取最新技能更新
+### 第三步：市场新增/更新插件后，同步拉取最新清单
 ```bash
 /plugin marketplace update skillhub
 ```
+
+> 新插件发布后必须执行第三步，否则客户端拉不到新插件。技能详情页的「安装指令」区域也会展示同款命令（`claude plugin marketplace update skillhub`），带一键复制。
+>
+> 插件安装落点：`marketplace add` 把市场仓库克隆到 `~/.claude/plugins/marketplaces/skillhub/`（源）；
+> `plugin install` 把单个插件复制到 `~/.claude/plugins/cache/skillhub/<插件>/<版本>/`（Claude Code 实际加载的安装副本）。
 
 ---
 
@@ -286,19 +299,28 @@ pnpm run server:start          # 或用 systemd 常驻
 ```text
 gemini-skillhub/
 ├── src/                    # React 19 + Vite 前端应用
-│   ├── components/         # UI 组件 (市场看板、详情页、审核中心、文件树)
-│   ├── mock/               # 本地开发 Mock 数据
+│   ├── components/         # UI 组件（集市、详情、审核、分类专家组管理、建议反馈等）
+│   ├── hooks/              # 数据 hook（useExpertDomains 等）
+│   ├── mock/               # 离线演示数据（业务数据以数据库为权威）
+│   ├── services/           # API 客户端（api.ts）
 │   └── types/              # TypeScript 核心业务实体类型定义
 ├── server/                 # NestJS 企业级后端服务
 │   ├── src/
 │   │   ├── modules/
-│   │   │   ├── git-market/ # Git Smart HTTP 协议与自动 Commit 模块
-│   │   │   ├── skills/     # 技能 CRUD、ZIP 上传解析与版本管理
-│   │   │   ├── audit/      # 双引擎风控审计网关 (Regex + DeepSeek)
-│   │   │   └── auth/       # 企业鉴权与 Token 守卫
-│   │   ├── database/       # 数据库模型与 ORM Schema
+│   │   │   ├── git-market/       # Git Smart HTTP 协议与自动 Commit 模块
+│   │   │   ├── skills/           # 技能 CRUD、ZIP 无损上传解析与版本管理
+│   │   │   ├── audit/            # 双引擎风控审计网关（正则 + LLM 语义）
+│   │   │   ├── auth/             # 工号/登录名鉴权、OSS 单点登录、RBAC
+│   │   │   ├── demands/          # 技能征集悬赏市场
+│   │   │   ├── feedback/         # 建议反馈管理
+│   │   │   ├── skill-categories/ # 技能分类标签管理
+│   │   │   ├── expert-domains/   # 岗位专家组管理（技能归属标签）
+│   │   │   └── demo-data/        # 演示用户与数据播种（幂等）
+│   │   ├── database/       # 数据库实体与 ORM Schema
 │   │   └── main.ts         # 服务入口与全局配置
 │   └── package.json
+├── docs/                   # 架构文档（database-schema.md 等）
+├── scripts/                # 回归测试、SQLite→PG 迁移等脚本
 ├── package.json            # 前端工程配置
 └── tsconfig.json
 ```

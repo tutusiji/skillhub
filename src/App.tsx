@@ -1483,10 +1483,11 @@ export default function App() {
         )}
 
         {/* VIEW 8: SUGGESTION CENTER (建议管理，仅管理员) */}
+        {/* VIEW 8: SUGGESTION CENTER (建议反馈，全员可用：管理员管理，普通用户看自己的+提交) */}
         {currentTab === 'feedback' && (
-          isAdmin ? (
+          currentUser ? (
             <FeedbackAdminView
-              currentUser={currentUser!}
+              currentUser={currentUser}
               feedbackList={feedbackList}
               onDeleteFeedback={handleDeleteFeedback}
               onOpenCreateFeedback={() => {
@@ -1499,15 +1500,18 @@ export default function App() {
               <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold mx-auto">
                 !
               </div>
-              <h2 className="text-lg font-bold text-slate-900">建议管理仅限管理员</h2>
+              <h2 className="text-lg font-bold text-slate-900">登录后使用建议反馈</h2>
               <p className="text-xs text-slate-500">
-                建议管理属于企业管理员专属模块，普通用户无此入口。
+                登录企业账号后即可提交建议：管理员可查看并管理全部建议，普通用户可查看自己的建议并提交新建议。
               </p>
               <button
-                onClick={() => navigate('market')}
-                className="px-5 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200"
+                onClick={() => {
+                  setLoginActionHint('提交建议');
+                  setShowLoginModal(true);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold shadow-sm hover:bg-indigo-700"
               >
-                返回技能集市
+                登录账号
               </button>
             </div>
           )
@@ -1690,7 +1694,7 @@ export default function App() {
 
       {/* 8. Floating Back to Top and Feedback Widget */}
       <BackToTop
-        showSuggestionButton={isAdmin}
+        showSuggestionButton
         onOpenFeedback={() => {
           if (requireAuth('查看建议中心')) {
             navigate('feedback');

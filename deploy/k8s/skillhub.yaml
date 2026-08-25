@@ -1,0 +1,169 @@
+# SkillHub Kubernetes 部署清单（内网）
+# 用法：kubectl apply -f deploy/k8s/skillhub.yaml
+# 完整说明见 docs/deployment-guide.md 第 8 节
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: skillhub
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: skillhub-secrets
+  namespace: skillhub
+type: Opaque
+stringData:
+  DB_PASSWORD: "your-strong-password"      # 生产建议用外部 Secret 管理（如 SealedSecret）
+  JWT_SECRET: "replace-with-random-64-hex"
+  LLM_API_KEY: ""
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: skillhub-config
+  namespace: skillhub
+data:
+  DB_TYPE: "postgres"
+  DB_HOST: "skillhub-postgres"
+  DB_PORT: "5432"
+  DB_USER: "skillhub"
+  DB_NAME: "skillhub"
+  LLM_BASE_URL: "https://api.deepseek.com/v1"
+  LLM_MODEL_NAME: "deepseek-chat"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: skillhub-storage
+  namespace: skillhub
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skillhub
+  namespace: skillhub
+spec:
+  replicas: 1            # 单副本即可；多副本需共享 storage（RWX/NFS）与数据库
+  selector:
+    matchLabels:
+      app: skillhub
+  template:
+    metadata:
+      labels:
+        app: skillhub
+    spec:
+      containers:
+        - name: skillhub
+          image: skillhub:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - configMapRef:
+                name: skillhub-config
+            - secretRef:
+                name: skillhub-secrets
+          volumeMounts:
+            - name: storage
+              mountPath: /app/server/storage
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /api/v1/skills
+              port: 3001
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: skillhub-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: skillhub
+  namespace: skillhub
+spec:
+  selector:
+    app: skillhub
+  ports:
+    - port: 3001
+      targetPort: 3001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skillhub-postgres
+  namespace: skillhub
+spec:
+  selector:
+    matchLabels:
+      app: skillhub-postgres
+  template:
+    metadata:
+      labels:
+        app: skillhub-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              value: skillhub
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: skillhub-secrets
+                  key: DB_PASSWORD
+            - name: POSTGRES_DB
+              value: skillhub
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: skillhub-postgres-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: skillhub-postgres-data
+  namespace: skillhub
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: skillhub
+  namespace: skillhub
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"   # 上传 ZIP 需要
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: skillhub.corp            # 内网域名，按环境替换
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: skillhub
+                port:
+                  number: 3001

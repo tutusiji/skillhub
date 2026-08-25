@@ -106,8 +106,8 @@ There is no unit-test framework. Regression is covered by two executable suites 
 
 ```bash
 pnpm run lint             # tsc --noEmit (frontend); server has its own tsconfig
-pnpm run test:regression  # node scripts/regression-test.mjs [baseUrl]  — 213 API assertions
-pnpm run test:plugin-e2e  # bash scripts/claude-plugin-e2e.sh [gitUrl] — 21 assertions via the real claude CLI
+pnpm run test:regression  # node scripts/regression-test.mjs [baseUrl]  — API assertions (≈282, varies with marketplace plugin count)
+pnpm run test:plugin-e2e  # bash scripts/claude-plugin-e2e.sh [gitUrl] — 165 assertions via the real claude CLI
 pnpm run test:all         # lint + both suites
 ```
 
@@ -126,6 +126,18 @@ pnpm run test:all         # lint + both suites
 - A `v` prefix in `version` (`v1.2.0`) is accepted.
 - Plugin names come from `toPluginName(slug)`, which strips the `@skillhub/` scope so the generated directory matches the `installCommands.claude` string shown in the UI. Keep those two in sync or copy-pasting from the detail page breaks.
 - `SkillsService.reconcileGitMarketOnBoot()` self-heals on startup: it re-syncs any approved skill missing from the manifest **or** whose on-disk layout fails `isPluginLayoutValid()` (legacy `skills: [*.md]` / string `author`), then rebuilds the index to drop stale directories. Deleting `server/storage/git-marketplace` is safe.
+
+### Install-detail commands are origin-dynamic
+`src/utils/marketplace.ts` derives the marketplace git URL from `VITE_API_BASE_URL` or `window.location.origin`, so `marketplace add <origin>/skillhub.git` works unchanged across dev/test/prod (e.g. `tech-dev.com:17200`). `getMarketplaceAddCommand()` → `claude plugin marketplace add <url>`; `getMarketplaceUpdateCommand()` → `claude plugin marketplace update skillhub` (shown with a copy button on the skill detail install section — new plugins are not installable until clients run it). Claude Code layout: `marketplace add` clones the source repo to `~/.claude/plugins/marketplaces/skillhub/`; `plugin install` copies the single plugin to `~/.claude/plugins/cache/skillhub/<plugin>/<version>/` (what Claude Code actually loads; uninstalls do not clear the cache dir).
+
+### Skill detail deep-link must never white-screen
+Refreshing on `/skill/:slug` may find the skill only on the server. `selectedSkill` init matches the mock constants only; a dedicated effect fetches `GET /api/v1/skills/:slug` when `currentTab === 'detail' && !selectedSkill` (with `detailLoading` state), and the render branch falls back to a "loading / not found" placeholder instead of rendering nothing. Keep that ternary (`selectedSkill ? <SkillDetailPage/> : placeholder`) — dropping the null branch reintroduces the white screen.
+
+### Floating feedback + back-to-top
+`BackToTop` is globally mounted in `App.tsx` and fixed at `bottom-24 right-6` on every page. The「建议反馈」button is vertical-text (`writing-mode: vertical-rl`), visible to **all** users, and navigates to `/feedback`; that route renders `FeedbackAdminView` for any logged-in user (admins manage all, normal users see their own + submit via `FeedbackModal`), with a login prompt when logged out. The「建议管理」dropdown item stays admin-only.
+
+### fileTree content vs zipBlob
+`createSkill` stores the frontend-provided `fileTree` (which includes text `content` for the detail-page file preview) **in preference to** parsing the uploaded ZIP for structure — the parser produces no `content`, so overriding with it would blank the preview. The original ZIP itself lives on `skills.zip_blob` (base64) + `zip_file_name`, powering lossless download and Git publish. When adding fields to `SkillEntity`, remember `fileTree` / `installCommands` / `auditScore` etc. are camelCase columns (no `name:` mapping).
 
 ## Deployment
 

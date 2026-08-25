@@ -22,6 +22,8 @@ SkillHub 后端使用 **TypeORM** 做对象关系映射，数据库层支持双�
 | `SkillDemandEntity` | `skill_demands` | uuid（自动生成） | 悬赏需求市场（征集/应征/验收） |
 | `LlmConfigEntity` | `llm_configs` | varchar（固定 `default`） | 大模型网关配置，全局单行 |
 | `FeedbackEntity` | `feedback` | uuid（自动生成） | 员工建议（管理员可查看与删除，无回复流转） |
+| `SkillCategoryEntity` | `skill_categories` | varchar（业务 ID） | 技能分类标签（集市 tab 与发布表单数据源） |
+| `ExpertDomainEntity` | `expert_domains` | varchar（业务 ID） | 岗位专家组配置（技能归属标签，可增删改查） |
 
 > ⚠️ **uuid 主键契约**：`users` / `audit_reports` / `skill_demands` 的主键是真正的 uuid 列。
 > SQLite 把 uuid 存成普通字符串，任意值都能查；PostgreSQL 下用非法格式查询会抛
@@ -82,9 +84,12 @@ SkillHub 后端使用 **TypeORM** 做对象关系映射，数据库层支持双�
 | `downloads` / `likes` / `stars` | int | default 0 | 社交计数 |
 | `permissions` | simple-json | default `[]` | 声明的系统权限 |
 | `installCommands` | simple-json | NOT NULL | 多端安装命令 `{claude, cursor, mcp, cli}` |
-| `fileTree` | simple-json | default `[]` | ZIP 文件树快照 |
+| `fileTree` | simple-json | default `[]` | 文件树（含文本文件 content，供详情预览） |
+| `zip_blob` | text | NULL | 上传时的**原始 ZIP**（base64），无损下载与 Git 市场发布的数据源 |
+| `zip_file_name` | varchar(255) | NULL | 上传时的原始 ZIP 文件名（下载优先使用） |
+| `expert_domains` | simple-json | default `[]` | 归属的专家组标签清单（可属于多个） |
 | `readme` | text | NULL | 说明文档正文 |
-| `expert_domain` | varchar(50) | NULL | 专家组领域 |
+| `expert_domain` | varchar(50) | NULL | 专家组领域（主领域，详情页兼容） |
 | `auditScore` | int | default 100 | 双引擎风控评分 |
 | `reviewed_by` | text | NULL | 审核人 |
 | `reviewed_at` | text | NULL | 审核时间 |
@@ -156,6 +161,31 @@ SkillHub 后端使用 **TypeORM** 做对象关系映射，数据库层支持双�
 
 > 接口语义：`POST /api/v1/feedback` 提交（需登录）；`GET` 管理员看全部、普通用户只看自己的；
 > `DELETE /api/v1/feedback/:id` 管理员或提交者本人可删。无回复流转。
+
+---
+
+## skill_categories（技能分类标签）
+
+主键为 varchar 业务 key（与 `skills.category` 取值对应）。字段：`id`、`label`（展示名）、
+`sort_order`（排序）、`is_enabled`（停用后不再出现在集市 tab 与发布表单）、`created_at`、`updated_at`。
+空库启动时播种 8 个默认分类。
+
+> 接口：`GET /api/v1/skill-categories` 匿名可读（`?all=1` 含停用）；增删改仅管理员。
+
+---
+
+## expert_domains（岗位专家组）
+
+主键为 varchar 业务 key（如 `fullstack`、`data_analyst`）。字段：`id`、`name`（全称）、
+`short_label`（首页卡片标题）、`description`（详情描述，首页卡片副标题小字）、`icon_name`、
+`badge_bg` / `badge_text` / `badge_border`（徽章配色 class）、`sort_order`、`created_at`、`updated_at`。
+空库启动时播种 9 个默认专家组。
+
+技能与专家组是多对多标签关系：`skills.expert_domains`（simple-json 数组）记录归属，
+由管理员在「分类和专家组管理」页维护。前端保留同名常量 `EXPERT_DOMAINS` 作为离线兜底。
+
+> 接口：`GET /api/v1/expert-domains` 匿名可读；增删改仅管理员；
+> 技能归属 `PUT /api/v1/skills/:id/expert-domains` body `{ domains: string[] }` 仅管理员。
 
 ---
 

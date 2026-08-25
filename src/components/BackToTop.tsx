@@ -37,17 +37,20 @@ export const BackToTop: React.FC<BackToTopProps> = ({ onOpenFeedback, showSugges
   };
 
   return (
-    <div className="fixed bottom-6 left-6 z-40 flex flex-col gap-2.5">
-      {/* Feedback button（仅管理员可见） */}
+    // 全局悬浮：固定在主内容右侧（右下角偏上），所有页面始终存在、不随内容滚动
+    <div className="fixed bottom-24 right-6 z-40 flex flex-col gap-2.5 items-end">
+      {/* 建议反馈悬浮按钮（全员可见）——竖向文字样式 */}
       {showSuggestionButton && (
         <button
           onClick={onOpenFeedback}
           id="btn-floating-feedback"
-          className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl hover:shadow-2xl hover:border-indigo-400 dark:hover:border-indigo-600 text-slate-700 dark:text-slate-200 text-xs font-semibold transition-all active:scale-95 group"
+          className="flex flex-col items-center gap-2 px-2.5 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl hover:shadow-2xl hover:border-indigo-400 dark:hover:border-indigo-600 text-slate-700 dark:text-slate-200 text-xs font-semibold transition-all active:scale-95 group"
           title="建议与反馈"
         >
           <MessageSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform" />
-          <span className="hidden sm:inline">建议中心</span>
+          <span className="[writing-mode:vertical-rl] tracking-widest leading-none">
+            建议反馈
+          </span>
         </button>
       )}
 

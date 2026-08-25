@@ -1,0 +1,43 @@
+services:
+  skillhub:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      DB_TYPE: postgres
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: skillhub
+      DB_PASSWORD: ${DB_PASSWORD:?请在 .env 中设置}
+      DB_NAME: skillhub
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 中设置}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+    volumes:
+      - skillhub-storage:/app/server/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: skillhub
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: skillhub
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skillhub"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  skillhub-storage:
+  postgres-data:
