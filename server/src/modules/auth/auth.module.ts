@@ -8,6 +8,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
 import { JwtStrategy } from './jwt.strategy';
+import { OssIamService } from './oss-iam.service';
 
 /**
  * 全局用户认证与 JWT 鉴权模块
@@ -29,7 +30,7 @@ import { JwtStrategy } from './jwt.strategy';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, AuthGuard, JwtStrategy],
+  providers: [AuthService, AuthGuard, JwtStrategy, OssIamService],
   exports: [AuthService, AuthGuard, JwtModule, PassportModule],
 })
 export class AuthModule {}

@@ -12,7 +12,7 @@ import {
   toPluginName,
 } from '../git-market/git-market.service';
 import { AuditService } from '../audit/audit.service';
-import JSZip from 'jszip';
+import * as JSZip from 'jszip';
 
 export interface FileTreeNode {
   name: string;
@@ -194,8 +194,16 @@ export class SkillsService implements OnModuleInit {
    * 解析 ZIP 二进制流提取文件树
    * @param zipBuffer ZIP 二进制流
    */
-  async parseZipFileTree(zipBuffer: Buffer): Promise<FileTreeNode[]> {
-    const zip = await JSZip.loadAsync(zipBuffer);
+  /**
+   * 从 ZIP 数据解析出文件树
+   * zipBuffer 支持两种形态：Buffer（Node 端）与 base64 字符串（前端上传经 JSON 传输）
+   * @param zipSource ZIP 数据源
+   */
+  async parseZipFileTree(zipSource: Buffer | string): Promise<FileTreeNode[]> {
+    const zip =
+      typeof zipSource === 'string'
+        ? await JSZip.loadAsync(zipSource, { base64: true })
+        : await JSZip.loadAsync(zipSource);
     const tree: FileTreeNode[] = [];
 
     for (const [filename, fileObj] of Object.entries(zip.files)) {
@@ -304,7 +312,10 @@ export class SkillsService implements OnModuleInit {
     readme?: string;
     expertDomain?: string;
     fileTree?: FileTreeNode[];
-    zipBuffer?: Buffer;
+    /** 原始 ZIP：Buffer（Node 调用）或 base64 字符串（前端 JSON 传输） */
+    zipBuffer?: Buffer | string;
+    /** 上传时的原始 ZIP 文件名（下载与展示用） */
+    zipFileName?: string;
   }): Promise<SkillEntity> {
     if (!payload?.name?.trim()) {
       throw new BadRequestException('技能名称为必填项');
@@ -319,12 +330,13 @@ export class SkillsService implements OnModuleInit {
       payload.name,
     );
 
-    // 文件树优先级：ZIP 解析 > 前端传入的虚拟文件树 > 默认模板
+    // 文件树优先级：前端传入的 fileTree（含文本内容，供详情预览）> ZIP 结构解析 > 默认模板
+    // 注意：zipBuffer 解析只生成目录结构不读内容，若用它覆盖前端 fileTree 会导致文件预览丢失内容
     let fileTree: FileTreeNode[] = [];
-    if (payload.zipBuffer) {
-      fileTree = await this.parseZipFileTree(payload.zipBuffer);
-    } else if (payload.fileTree?.length) {
+    if (payload.fileTree?.length) {
       fileTree = payload.fileTree;
+    } else if (payload.zipBuffer) {
+      fileTree = await this.parseZipFileTree(payload.zipBuffer);
     } else {
       fileTree = [
         {
@@ -336,6 +348,8 @@ export class SkillsService implements OnModuleInit {
     }
 
     // 触发双引擎风控扫描：将描述、README 与文件内容一并纳入扫描面
+    // 注意：扫描结果只作为评分与风控参考落库（auditScore），不决定上架状态——
+    // 所有新提交一律进入管理员人工审核队列，由管理员审核通过后才上架并发布 Git
     const scanPayload = [
       payload.description,
       payload.readme || '',
@@ -358,7 +372,8 @@ export class SkillsService implements OnModuleInit {
         payload.avatar ||
         'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces',
       version: payload.version || 'v1.0.0',
-      status: scanResult.status === 'passed' ? 'approved' : 'pending',
+      // 统一待管理员审核：扫描通过与否都不自动上架
+      status: 'pending',
       clients: payload.clients?.length
         ? payload.clients
         : ['claude', 'cursor', 'mcp'],
@@ -380,19 +395,18 @@ export class SkillsService implements OnModuleInit {
       readme: payload.readme || payload.description,
       expertDomain: payload.expertDomain || null,
       auditScore: scanResult.score,
+      // 保留原始 ZIP（base64）与上传文件名，供无损下载与 Git 市场发布使用
+      zipBlob: payload.zipBuffer
+        ? typeof payload.zipBuffer === 'string'
+          ? payload.zipBuffer
+          : payload.zipBuffer.toString('base64')
+        : null,
+      zipFileName: payload.zipFileName?.trim() || null,
     });
 
     const saved = await this.skillRepository.save(newSkill);
 
-    // 审核直接通过则自动触发 Git Commit
-    if (saved.status === 'approved') {
-      await this.gitMarketService.syncApprovedSkillToGit(
-        saved,
-        payload.zipBuffer,
-        saved.version,
-      );
-    }
-
+    // 新提交一律 pending，等待管理员人工审核（审核通过由 approveSkill 触发 Git 发布）
     return saved;
   }
 
@@ -414,12 +428,36 @@ export class SkillsService implements OnModuleInit {
     skill.adminFeedback = feedback || '审核通过，准予在内网市场公开。';
 
     const updated = await this.skillRepository.save(skill);
+    // 用用户上传的原始 ZIP 写入 Git 市场，确保安装到的是真实技能内容而非模板空壳
     await this.gitMarketService.syncApprovedSkillToGit(
       updated,
-      undefined,
+      this.zipBufferOf(updated),
       updated.version,
     );
     return updated;
+  }
+
+  /**
+   * 从技能实体解码出原始 ZIP Buffer（zipBlob 存 base64）
+   * @param skill 技能实体
+   */
+  private zipBufferOf(skill: SkillEntity): Buffer | undefined {
+    return skill.zipBlob ? Buffer.from(skill.zipBlob, 'base64') : undefined;
+  }
+
+  /**
+   * 读取技能上传时的原始 ZIP（含文件名）
+   * @param id 技能 ID
+   */
+  async getOriginalZip(
+    id: string,
+  ): Promise<{ buffer: Buffer; fileName: string | null } | null> {
+    const skill = await this.skillRepository.findOne({ where: { id } });
+    if (!skill || !skill.zipBlob) return null;
+    return {
+      buffer: Buffer.from(skill.zipBlob, 'base64'),
+      fileName: skill.zipFileName,
+    };
   }
 
   /**
@@ -486,7 +524,7 @@ export class SkillsService implements OnModuleInit {
     const updated = await this.skillRepository.save(skill);
     await this.gitMarketService.syncApprovedSkillToGit(
       updated,
-      undefined,
+      this.zipBufferOf(updated),
       updated.version,
     );
     return updated;
@@ -529,7 +567,7 @@ export class SkillsService implements OnModuleInit {
     for (const skill of missing) {
       await this.gitMarketService.syncApprovedSkillToGit(
         skill,
-        undefined,
+        this.zipBufferOf(skill),
         skill.version,
       );
     }
@@ -581,6 +619,27 @@ export class SkillsService implements OnModuleInit {
     if (!skill) throw new NotFoundException('未找到对应技能');
 
     skill.auditScore = Math.max(0, Math.min(100, Math.round(score)));
+    return this.skillRepository.save(skill);
+  }
+
+  /**
+   * 维护技能的专家组归属（专家组即标签，一个技能可属于多个专家组）
+   * @param id 技能 ID
+   * @param domains 专家组 ID 清单
+   */
+  async updateExpertDomains(
+    id: string,
+    domains: string[],
+  ): Promise<SkillEntity> {
+    const skill = await this.skillRepository.findOne({ where: { id } });
+    if (!skill) throw new NotFoundException('未找到对应技能');
+
+    // 去重 + 忽略空值；保留主领域字段作为详情页兼容展示
+    const clean = [...new Set(domains.map(d => d.trim()).filter(Boolean))];
+    skill.expertDomains = clean;
+    if (clean.length > 0 && !skill.expertDomain) {
+      skill.expertDomain = clean[0];
+    }
     return this.skillRepository.save(skill);
   }
 }

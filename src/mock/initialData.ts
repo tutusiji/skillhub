@@ -16,7 +16,7 @@ export const INITIAL_USERS: UserAccount[] = [
     id: 'user-2',
     name: '陈思宇 (Senior FullStack)',
     email: 'chen.siyu@intranet.corp',
-    role: 'developer',
+    role: 'user',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
     department: '智能终端研发部',
     joinedAt: '2025-03-20',
@@ -27,7 +27,7 @@ export const INITIAL_USERS: UserAccount[] = [
     id: 'user-3',
     name: '黄雅婷 (数据科学专家)',
     email: 'huang.yating@intranet.corp',
-    role: 'developer',
+    role: 'user',
     avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
     department: '大数据分析中心',
     joinedAt: '2025-02-10',
@@ -38,7 +38,7 @@ export const INITIAL_USERS: UserAccount[] = [
     id: 'user-4',
     name: '赵子涵 (UI/UX 体验主管)',
     email: 'zhao.zihan@intranet.corp',
-    role: 'developer',
+    role: 'user',
     avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
     department: '用户体验设计部 / UED',
     joinedAt: '2025-02-18',
@@ -49,7 +49,7 @@ export const INITIAL_USERS: UserAccount[] = [
     id: 'user-5',
     name: '严宏斌 (高级产品总监)',
     email: 'yan.hongbin@intranet.corp',
-    role: 'developer',
+    role: 'user',
     avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
     department: '企业数字化产品部',
     joinedAt: '2025-01-28',
@@ -60,7 +60,7 @@ export const INITIAL_USERS: UserAccount[] = [
     id: 'user-6',
     name: '孙明杰 (嵌入式与硬件总监)',
     email: 'sun.mingjie@intranet.corp',
-    role: 'developer',
+    role: 'user',
     avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80',
     department: '智能物联网与硬件实验室',
     joinedAt: '2025-02-22',
@@ -71,7 +71,7 @@ export const INITIAL_USERS: UserAccount[] = [
     id: 'user-7',
     name: '杜晓雯 (测试与质量工程主管)',
     email: 'du.xiaowen@intranet.corp',
-    role: 'developer',
+    role: 'user',
     avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80',
     department: '效能与质量工程部',
     joinedAt: '2025-03-01',
@@ -1097,15 +1097,19 @@ export const INITIAL_FEEDBACK: FeedbackItem[] = [
   }
 ];
 
+/**
+ * LLM 网关的前端初始展示配置
+ * 真实凭据与生效配置由后端 /api/v1/audit/llm-config 持久化，前端不保存 API Key 明文，
+ * 这里仅提供进入风控中心前的占位默认值
+ */
 export const INITIAL_DEEPSEEK_CONFIG: DeepSeekConfig = {
   baseUrl: 'https://api.deepseek.com/v1',
-  apiKey: 'sk-dsk-intranet-live-prod-token-9824f1',
+  apiKey: '',
   modelName: 'deepseek-chat',
   temperature: 0.1,
-  maxTokens: 4096,
+  maxTokens: 2048,
   systemPrompt: '你是一个企业级 AI 技能安全合规审计引擎。你需要对待审代码和 Prompt 模板进行多维度语义风险推导，并按格式输出风险等级、漏洞位置和整改建议。',
-  lastTestedAt: '2025-03-08T10:30:00Z',
-  testStatus: 'success'
+  testStatus: 'untested'
 };
 
 export const INITIAL_SKILL_DEMANDS: SkillDemand[] = [

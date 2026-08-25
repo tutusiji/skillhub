@@ -3,9 +3,11 @@ import { ChevronUp, MessageSquare } from 'lucide-react';
 
 interface BackToTopProps {
   onOpenFeedback: () => void;
+  /** 建议中心按钮是否可见（仅管理员） */
+  showSuggestionButton?: boolean;
 }
 
-export const BackToTop: React.FC<BackToTopProps> = ({ onOpenFeedback }) => {
+export const BackToTop: React.FC<BackToTopProps> = ({ onOpenFeedback, showSuggestionButton = true }) => {
   const [visible, setVisible] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
 
@@ -36,16 +38,18 @@ export const BackToTop: React.FC<BackToTopProps> = ({ onOpenFeedback }) => {
 
   return (
     <div className="fixed bottom-6 left-6 z-40 flex flex-col gap-2.5">
-      {/* Feedback button */}
-      <button
-        onClick={onOpenFeedback}
-        id="btn-floating-feedback"
-        className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl hover:shadow-2xl hover:border-indigo-400 dark:hover:border-indigo-600 text-slate-700 dark:text-slate-200 text-xs font-semibold transition-all active:scale-95 group"
-        title="建议与体验反馈"
-      >
-        <MessageSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform" />
-        <span className="hidden sm:inline">全站反馈</span>
-      </button>
+      {/* Feedback button（仅管理员可见） */}
+      {showSuggestionButton && (
+        <button
+          onClick={onOpenFeedback}
+          id="btn-floating-feedback"
+          className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl hover:shadow-2xl hover:border-indigo-400 dark:hover:border-indigo-600 text-slate-700 dark:text-slate-200 text-xs font-semibold transition-all active:scale-95 group"
+          title="建议与反馈"
+        >
+          <MessageSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform" />
+          <span className="hidden sm:inline">建议中心</span>
+        </button>
+      )}
 
       {/* Back to top with progress ring */}
       {visible && (

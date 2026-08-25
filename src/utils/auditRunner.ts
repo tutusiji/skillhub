@@ -1,4 +1,5 @@
 import { AuditExecutionSummary, AuditItemResult, AuditRule, DeepSeekConfig, FileTreeNode, SkillItem } from '../types';
+import { api, type ApiLlmVerdict } from '../services/api';
 
 interface FlattenedFile {
   path: string;
@@ -53,6 +54,36 @@ export async function executeDualEngineAudit(
   const totalCount = regexRules.length + llmRules.length;
 
   const modelLabel = deepseekConfig?.modelName || 'DeepSeek-V3 / Chat';
+
+  // 优先向后端请求真实的双引擎语义研判结论；后端不可用时回退到本地启发式判定，
+  // 保证离线/演示模式下体检流程仍可完整走通
+  let serverVerdict: ApiLlmVerdict | null = null;
+  if (llmRules.length > 0) {
+    if (onProgress) {
+      onProgress('正在请求服务端大模型语义研判引擎...', totalProcessed, totalCount);
+    }
+    try {
+      const scan = await api.runSandboxScan(fullPayload, skill.id);
+      serverVerdict = scan.llmVerdict;
+    } catch {
+      serverVerdict = null;
+    }
+  }
+
+  /** 后端语义研判结论到单条审计项状态的映射 */
+  const verdictStatus: 'pass' | 'warning' | 'fail' =
+    serverVerdict?.status === 'failed'
+      ? 'fail'
+      : serverVerdict?.status === 'warning'
+        ? 'warning'
+        : 'pass';
+
+  /** 展示用的引擎标签：真实模型名 或 本地启发式引擎 */
+  const engineLabel = serverVerdict
+    ? serverVerdict.engine === 'llm'
+      ? serverVerdict.model || modelLabel
+      : '本地启发式引擎 (LLM 未启用)'
+    : modelLabel;
 
   // 1. Run Regex Engine Rules
   for (const rule of regexRules) {
@@ -137,7 +168,7 @@ export async function executeDualEngineAudit(
   // 2. Run LLM AI Engine Rules with DeepSeek
   for (const rule of llmRules) {
     if (onProgress) {
-      onProgress(`正在通过 ${modelLabel} 执行语义安全审计: ${rule.name}`, totalProcessed, totalCount);
+      onProgress(`正在通过 ${engineLabel} 执行语义安全审计: ${rule.name}`, totalProcessed, totalCount);
       await new Promise(r => setTimeout(r, 100));
     }
 
@@ -181,6 +212,18 @@ export async function executeDualEngineAudit(
         detectedSnippet = 'eval(Buffer.from(payload, "base64").toString())';
         filePath = 'src/index.ts';
       }
+    }
+
+    // 服务端已给出真实语义研判结论时，以其为准覆盖本地启发式判定
+    if (serverVerdict) {
+      status = verdictStatus;
+      matchedSummary = `[${engineLabel}] ${serverVerdict.summary}`;
+      riskExplanation = serverVerdict.reasoning.join(' ') || serverVerdict.summary;
+      aiReasoning = serverVerdict.degradedReason
+        ? `${serverVerdict.reasoning.join(' / ') || serverVerdict.summary}（降级原因：${serverVerdict.degradedReason}）`
+        : `${engineLabel} 研判置信度 ${(serverVerdict.confidence * 100).toFixed(0)}%，耗时 ${serverVerdict.latencyMs ?? 0}ms：${serverVerdict.reasoning.join(' / ') || serverVerdict.summary}`;
+      remediationSuggestion =
+        serverVerdict.suggestions.join('；') || remediationSuggestion;
     }
 
     llmResults.push({

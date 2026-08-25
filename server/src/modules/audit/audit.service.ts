@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AuditRuleEntity } from '../../database/entities/audit-rule.entity';
 import { AuditReportEntity } from '../../database/entities/audit-report.entity';
+import { LlmAuditService } from './llm-audit.service';
 
 export interface RegexHit {
   ruleId: string;
@@ -19,6 +20,14 @@ export interface LLMVerdict {
   summary: string;
   reasoning: string[];
   suggestions: string[];
+  /** 本次结论的实际来源：真实大模型 / 本地启发式降级 */
+  engine?: 'llm' | 'heuristic';
+  /** 生效的模型名称，降级时为 local-heuristic */
+  model?: string;
+  /** LLM 调用耗时毫秒 */
+  latencyMs?: number;
+  /** 降级原因，仅在 engine === 'heuristic' 时有值 */
+  degradedReason?: string;
 }
 
 export interface AuditReportResult {
@@ -148,6 +157,7 @@ export class AuditService implements OnModuleInit {
     private readonly ruleRepository: Repository<AuditRuleEntity>,
     @InjectRepository(AuditReportEntity)
     private readonly reportRepository: Repository<AuditReportEntity>,
+    private readonly llmAuditService: LlmAuditService,
   ) {}
 
   /**
@@ -277,10 +287,26 @@ export class AuditService implements OnModuleInit {
     }
 
     // 2. 引擎 2：LLM 语义研判
+    //    优先调用真实模型网关；未配置/超时/解析失败时自动降级到本地启发式引擎，
+    //    保证审核链路在任何情况下都能给出结论而不中断发布流程
     const llmRules = await this.ruleRepository.find({
       where: { type: 'llm', isEnabled: true },
     });
-    const llmVerdict = this.evaluateSemanticRisk(payload, regexHits, llmRules);
+    const heuristicVerdict = this.evaluateSemanticRisk(
+      payload,
+      regexHits,
+      llmRules,
+    );
+    const regexContext = regexHits.length
+      ? regexHits
+          .map((h) => `- [${h.severity}] ${h.ruleName}：命中 ${h.matchSnippet}`)
+          .join('\n')
+      : undefined;
+    const llmVerdict: LLMVerdict = await this.llmAuditService.evaluate(
+      payload,
+      heuristicVerdict,
+      regexContext,
+    );
 
     // 3. 计算综合风险分值与放行判定
     let score = 100;

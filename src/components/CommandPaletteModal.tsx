@@ -34,15 +34,18 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
 
   if (!isOpen) return null;
 
+  // 全局搜索只展示已审核通过的技能，待审核/驳回/下架技能不出现在搜索结果
+  const searchable = skills.filter(s => s.status === 'approved');
+
   const filtered = query.trim()
-    ? skills.filter(
+    ? searchable.filter(
         s =>
           s.name.toLowerCase().includes(query.toLowerCase()) ||
           s.slug.toLowerCase().includes(query.toLowerCase()) ||
           s.category.toLowerCase().includes(query.toLowerCase()) ||
           s.description.toLowerCase().includes(query.toLowerCase())
       )
-    : skills.slice(0, 6);
+    : searchable.slice(0, 6);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
@@ -58,7 +61,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
             autoFocus
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="快速搜索插件、MCP 服务、CLI 命令或业务分类 (输入 @ 查看标识)..."
+            placeholder="搜索技能名称、包标识 (@skillhub/...) 或作者..."
             className="w-full bg-transparent text-sm text-slate-900 placeholder-slate-400 outline-none"
           />
           <button
@@ -72,7 +75,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
         {/* Results */}
         <div className="p-3 max-h-96 overflow-y-auto space-y-1 text-xs">
           <div className="px-3 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-            {query.trim() ? `搜索匹配 (${filtered.length})` : '热门内网技能推荐'}
+            {query.trim() ? `搜索匹配 (${filtered.length})` : '热门技能推荐'}
           </div>
 
           {filtered.map(skill => (

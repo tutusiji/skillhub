@@ -26,7 +26,6 @@ import { PersonalCenterView } from './components/PersonalCenterView';
 import { UploadSkillModal } from './components/UploadSkillModal';
 import { AuditManagementView } from './components/AuditManagementView';
 import { RuleManagementView } from './components/RuleManagementView';
-import { RuleManagementModal } from './components/RuleManagementModal';
 import { AdminSettingsView } from './components/AdminSettingsView';
 import { CreateSkillDemandModal } from './components/CreateSkillDemandModal';
 import { SkillDemandDetailModal } from './components/SkillDemandDetailModal';
@@ -37,95 +36,82 @@ import { BackToTop } from './components/BackToTop';
 import { ToastContainer } from './components/Toast';
 import { downloadSkillAsZip } from './utils/zipHelper';
 import { executeDualEngineAudit } from './utils/auditRunner';
-import { api, mapApiDemand, mapApiSkill, mapApiUser, mapAuditRule, syncToBackend } from './services/api';
+import { api, mapApiDemand, mapApiFeedback, mapApiSkill, mapApiUser, mapAuditRule, syncToBackend } from './services/api';
+import { FeedbackAdminView } from './components/FeedbackAdminView';
+import { CategoryAndDomainView } from './components/CategoryAndDomainView';
+
+/** 普通 tab → 路径映射（不含 detail，detail 走 /skill/:slug） */
+const TAB_PATHS: Record<string, string> = {
+  market: '/',
+  demands: '/demands',
+  personal: '/personal',
+  audit: '/audit',
+  rules: '/rules',
+  settings: '/settings',
+  feedback: '/feedback',
+  manage: '/manage',
+};
+
+/**
+ * 解析浏览器路径为页面 tab
+ * 支持 /skill/:slugOrId 详情路径，未知路径回落到 market
+ * @param pathname 当前路径
+ */
+function parseLocation(pathname: string): { tab: NavigationTab | 'detail'; skillSlug: string | null } {
+  const skillMatch = pathname.match(/^\/skill\/([^/]+)/);
+  if (skillMatch) {
+    return { tab: 'detail', skillSlug: decodeURIComponent(skillMatch[1]) };
+  }
+  for (const [tab, path] of Object.entries(TAB_PATHS)) {
+    if (path === pathname) return { tab: tab as NavigationTab, skillSlug: null };
+  }
+  return { tab: 'market', skillSlug: null };
+}
 
 export default function App() {
-  // Users state with LocalStorage persistence
-  const [allUsers, setAllUsers] = useState<UserAccount[]>(() => {
-    const saved = localStorage.getItem('skillhub_all_users');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return INITIAL_USERS;
-  });
+  // 业务数据一律以数据库/后端为权威，本地仅用编译期 mock 常量作为离线演示兜底，
+  // 不再读写 localStorage（认证令牌除外）——见下方各 state 初始化与登录后的后端拉取
 
-  // Main Skills State with LocalStorage persistence
-  const [skills, setSkills] = useState<SkillItem[]>(() => {
-    const saved = localStorage.getItem('skillhub_skills');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return INITIAL_SKILLS;
-  });
+  // 组织用户名单（登录后由 /auth/users 覆盖）
+  const [allUsers, setAllUsers] = useState<UserAccount[]>(INITIAL_USERS);
 
-  // Skill Demands State with LocalStorage persistence
-  const [demands, setDemands] = useState<SkillDemand[]>(() => {
-    const saved = localStorage.getItem('skillhub_demands');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return INITIAL_SKILL_DEMANDS;
-  });
+  // 技能列表（启动后由 /skills 覆盖）
+  const [skills, setSkills] = useState<SkillItem[]>(INITIAL_SKILLS);
 
-  const [rules, setRules] = useState<AuditRule[]>(() => {
-    const saved = localStorage.getItem('skillhub_rules');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return INITIAL_AUDIT_RULES;
-  });
+  // 征集需求（启动后由 /demands 覆盖）
+  const [demands, setDemands] = useState<SkillDemand[]>(INITIAL_SKILL_DEMANDS);
 
-  const [feedbackList, setFeedbackList] = useState<FeedbackItem[]>(() => {
-    const saved = localStorage.getItem('skillhub_feedback');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return INITIAL_FEEDBACK;
-  });
+  const [rules, setRules] = useState<AuditRule[]>(INITIAL_AUDIT_RULES);
 
-  const [deepseekConfig, setDeepseekConfig] = useState<DeepSeekConfig>(() => {
-    const saved = localStorage.getItem('skillhub_deepseek');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return INITIAL_DEEPSEEK_CONFIG;
-  });
+  // 建议列表：后端为数据源（登录后拉取）
+  const [feedbackList, setFeedbackList] = useState<FeedbackItem[]>(INITIAL_FEEDBACK);
 
-  // Current logged in user (null = unauthenticated / guest by default)
-  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
-    const saved = localStorage.getItem('skillhub_user');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return null; // Guest mode by default
-  });
+  // LLM 网关展示配置：真实凭据由后端持久化，展示态由风控中心从 /audit/llm-config 拉取
+  const [deepseekConfig, setDeepseekConfig] = useState<DeepSeekConfig>(INITIAL_DEEPSEEK_CONFIG);
+
+  // 当前登录用户（null = 未登录/访客）。启动时若有有效令牌，由 /auth/me 回源最新身份
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
 
   // Backend integration status (null = checking, false = offline demo fallback)
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
-
-  // Save current user to LocalStorage
-  useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem('skillhub_user', JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem('skillhub_user');
-    }
-  }, [currentUser]);
   
-  // Navigation / Routing State with Hash & SessionStorage memory
+  // Navigation / Routing State with history-path + SessionStorage memory
   const [currentTab, setCurrentTab] = useState<NavigationTab | 'detail'>(() => {
     try {
+      // 兼容旧 hash 链接（/#tab=xxx / #skill=xxx）
       const hash = window.location.hash.replace('#', '');
       if (hash.startsWith('tab=')) {
         const tabVal = hash.split('tab=')[1] as any;
-        if (['market', 'demands', 'personal', 'audit', 'rules', 'settings', 'detail'].includes(tabVal)) return tabVal;
-      } else if (hash.startsWith('skill=')) {
-        return 'detail';
+        if (TAB_PATHS[tabVal]) return tabVal;
       }
+      if (hash.startsWith('skill=')) return 'detail';
+
+      // 路径型路由解析
+      const parsed = parseLocation(window.location.pathname);
+      if (parsed.tab === 'detail' || TAB_PATHS[parsed.tab]) return parsed.tab;
+
       const savedTab = sessionStorage.getItem('skillhub_active_tab') as any;
-      if (savedTab && ['market', 'demands', 'personal', 'audit', 'rules', 'settings', 'detail'].includes(savedTab)) {
-        return savedTab;
-      }
+      if (savedTab && TAB_PATHS[savedTab]) return savedTab;
     } catch (e) {}
     return 'market';
   });
@@ -140,17 +126,13 @@ export default function App() {
       if (hash.startsWith('skill=')) {
         targetId = hash.split('skill=')[1];
       } else {
-        targetId = sessionStorage.getItem('skillhub_selected_skill_id');
+        const m = window.location.pathname.match(/^\/skill\/([^/]+)/);
+        if (m) targetId = decodeURIComponent(m[1]);
+        else targetId = sessionStorage.getItem('skillhub_selected_skill_id');
       }
       if (targetId) {
-        const initialList = (() => {
-          const saved = localStorage.getItem('skillhub_skills');
-          if (saved) {
-            try { return JSON.parse(saved); } catch (e) {}
-          }
-          return INITIAL_SKILLS;
-        })();
-        const found = initialList.find((s: SkillItem) => s.id === targetId || s.slug === targetId);
+        // 技能数据以数据库为准，这里仅从编译期 mock 常量中做离线直达匹配
+        const found = INITIAL_SKILLS.find((s: SkillItem) => s.id === targetId || s.slug === targetId);
         if (found) return found;
       }
     } catch (e) {}
@@ -160,45 +142,107 @@ export default function App() {
   // Selected demand for detail modal
   const [selectedDemand, setSelectedDemand] = useState<SkillDemand | null>(null);
 
-  // Sync tab & route changes to sessionStorage and hash
+  /**
+   * 统一的页面跳转入口：更新 URL（pushState）并切换页面状态
+   * 所有 tab 切换都应走这里，保证 URL 与页面一致
+   * @param tab 目标页面
+   * @param skill 进入详情页时传入的技能对象
+   */
+  const navigate = (tab: NavigationTab | 'detail', skill?: SkillItem | null) => {
+    let path = '/';
+    if (tab === 'detail') {
+      if (!skill) return;
+      path = `/skill/${encodeURIComponent(skill.slug || skill.id)}`;
+    } else {
+      path = TAB_PATHS[tab] || '/';
+    }
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
+    if (tab === 'detail' && skill) setSelectedSkill(skill);
+    setCurrentTab(tab);
+  };
+
+  // 兼容旧 hash 链接：把 /#tab=xxx / /#skill=xxx 一次性迁移为路径型 URL
+  useEffect(() => {
+    try {
+      const hash = window.location.hash.replace('#', '');
+      if (!hash || window.location.pathname !== '/') return;
+      let path = '/';
+      if (hash.startsWith('skill=')) {
+        path = `/skill/${encodeURIComponent(hash.split('skill=')[1])}`;
+      } else if (hash.startsWith('tab=')) {
+        path = TAB_PATHS[hash.split('tab=')[1]] || '/';
+      }
+      if (path !== '/') {
+        window.history.replaceState({}, '', path);
+      }
+    } catch (e) {}
+  }, []);
+
+  // Sync tab to sessionStorage (refresh recovery; pathname is the primary source)
   useEffect(() => {
     try {
       sessionStorage.setItem('skillhub_active_tab', currentTab);
       if (currentTab === 'detail' && selectedSkill) {
         sessionStorage.setItem('skillhub_selected_skill_id', selectedSkill.id);
-        window.location.hash = `skill=${selectedSkill.id}`;
-      } else {
-        window.location.hash = `tab=${currentTab}`;
       }
     } catch (e) {}
   }, [currentTab, selectedSkill]);
 
-  // Handle browser back / forward navigation via hashchange
+  // 刷新直达详情页：/skill/:slug 对应的技能不在本地时，从后端拉取，避免白屏
   useEffect(() => {
-    const handleHashChange = () => {
-      const hash = window.location.hash.replace('#', '');
-      if (hash.startsWith('skill=')) {
-        const skillId = hash.split('skill=')[1];
-        const target = skills.find(s => s.id === skillId || s.slug === skillId);
+    if (currentTab !== 'detail' || selectedSkill) return;
+    const m = window.location.pathname.match(/^\/skill\/([^/]+)/);
+    const slug = m ? decodeURIComponent(m[1]) : null;
+    if (!slug) return;
+
+    let cancelled = false;
+    setDetailLoading(true);
+    api
+      .getSkill(slug)
+      .then(detail => {
+        if (cancelled) return;
+        const full = mapApiSkill(detail);
+        setSkills(prev => (prev.some(s => s.id === full.id) ? prev : [full, ...prev]));
+        setSelectedSkill(full);
+      })
+      .catch(() => {
+        /* 技能不存在或后端不可用：渲染「未找到」占位 */
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTab, selectedSkill]);
+
+  // Handle browser back / forward navigation via popstate
+  useEffect(() => {
+    const handlePopState = () => {
+      const { tab, skillSlug } = parseLocation(window.location.pathname);
+      if (tab === 'detail' && skillSlug) {
+        const target = skills.find(s => s.id === skillSlug || s.slug === skillSlug);
         if (target) {
           setSelectedSkill(target);
           setCurrentTab('detail');
+        } else {
+          // 技能已被删除等情况下回落到技能集市
+          setCurrentTab('market');
         }
-      } else if (hash.startsWith('tab=')) {
-        const tabVal = hash.split('tab=')[1] as any;
-        if (['market', 'demands', 'personal', 'audit', 'rules', 'settings'].includes(tabVal)) {
-          setCurrentTab(tabVal);
-        }
+      } else {
+        setCurrentTab(tab);
       }
     };
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, [skills]);
 
   // Modals
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showCreateDemandModal, setShowCreateDemandModal] = useState(false);
-  const [showRuleModal, setShowRuleModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -207,33 +251,14 @@ export default function App() {
   // Scanning indicator
   const [isScanningDetail, setIsScanningDetail] = useState(false);
 
+  // 详情页直达加载态：刷新访问 /skill/:slug 时技能不在本地，需从后端异步拉取
+  const [detailLoading, setDetailLoading] = useState(false);
+
   // Toast Notifications
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Sync to LocalStorage
-  useEffect(() => {
-    localStorage.setItem('skillhub_all_users', JSON.stringify(allUsers));
-  }, [allUsers]);
-
-  useEffect(() => {
-    localStorage.setItem('skillhub_skills', JSON.stringify(skills));
-  }, [skills]);
-
-  useEffect(() => {
-    localStorage.setItem('skillhub_demands', JSON.stringify(demands));
-  }, [demands]);
-
-  useEffect(() => {
-    localStorage.setItem('skillhub_rules', JSON.stringify(rules));
-  }, [rules]);
-
-  useEffect(() => {
-    localStorage.setItem('skillhub_feedback', JSON.stringify(feedbackList));
-  }, [feedbackList]);
-
-  useEffect(() => {
-    localStorage.setItem('skillhub_deepseek', JSON.stringify(deepseekConfig));
-  }, [deepseekConfig]);
+  // 业务数据全部以数据库/后端为权威，不再回写 localStorage。
+  // （会话令牌 skillhub_token 由 api.ts / LoginModal 管理，属浏览器认证必需项）
 
   // Global Keyboard listener for Command+K
   useEffect(() => {
@@ -266,13 +291,13 @@ export default function App() {
 
   // Bootstrap read-only enterprise data from the NestJS backend. The local mock data
   // remains an explicit offline fallback so the demo still works without server setup.
+  // 组织用户名单 (allUsers) 不在匿名拉取之列：该接口现在要求登录态，由下方登录后的 effect 拉取
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      const [skillsResult, usersResult, rulesResult, demandsResult] = await Promise.allSettled([
+      const [skillsResult, rulesResult, demandsResult] = await Promise.allSettled([
         api.listSkills(),
-        api.listUsers(),
         api.listAuditRules(),
         api.listDemands(),
       ]);
@@ -283,9 +308,6 @@ export default function App() {
         setSkills(skillsResult.value.map(mapApiSkill));
         setBackendOnline(true);
       }
-      if (usersResult.status === 'fulfilled') {
-        setAllUsers(usersResult.value.map(mapApiUser));
-      }
       if (rulesResult.status === 'fulfilled') {
         setRules(rulesResult.value.map(mapAuditRule));
       }
@@ -295,7 +317,6 @@ export default function App() {
 
       if (
         skillsResult.status === 'rejected' &&
-        usersResult.status === 'rejected' &&
         rulesResult.status === 'rejected' &&
         demandsResult.status === 'rejected'
       ) {
@@ -331,6 +352,26 @@ export default function App() {
       } catch {
         // Keep the cached demo identity if the server is temporarily unavailable.
       }
+
+      // 登录态下同步拉取组织用户名单（账号切换器与权限设置页依赖）
+      try {
+        const users = await api.listUsers();
+        if (!cancelled) {
+          setAllUsers(users.map(mapApiUser));
+        }
+      } catch {
+        // 名单拉取失败不影响主流程
+      }
+
+      // 登录态下同步拉取建议列表（建议管理页数据源）
+      try {
+        const feedback = await api.listFeedback();
+        if (!cancelled) {
+          setFeedbackList(feedback.map(mapApiFeedback));
+        }
+      } catch {
+        // 建议列表拉取失败不影响主流程
+      }
     })();
 
     return () => {
@@ -355,14 +396,30 @@ export default function App() {
     setCurrentUser(user);
     setShowLoginModal(false);
     addToast('success', '登录成功', `欢迎回来，${user.name}！已为您开启全部操作权限`);
+
+    // 登录成功后再拉取组织用户名单（/auth/users 要求登录态）
+    api
+      .listUsers()
+      .then(users => setAllUsers(users.map(mapApiUser)))
+      .catch(() => {
+        /* 名单拉取失败不阻塞登录 */
+      });
+
+    // 登录后拉取建议列表（管理员看全部、普通用户看自己的）
+    api
+      .listFeedback()
+      .then(feedback => setFeedbackList(feedback.map(mapApiFeedback)))
+      .catch(() => {
+        /* 建议列表拉取失败不阻塞登录 */
+      });
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('skillhub_user');
     localStorage.removeItem('skillhub_token');
-    if (currentTab === 'audit' || currentTab === 'rules' || currentTab === 'settings' || currentTab === 'personal') {
-      setCurrentTab('market');
+    if (currentTab === 'audit' || currentTab === 'rules' || currentTab === 'settings' || currentTab === 'feedback' || currentTab === 'personal') {
+      navigate('market');
     }
     addToast('info', '已退出登录', '当前处于访客模式，仍可自由下载和复制安装指令');
   };
@@ -372,9 +429,24 @@ export default function App() {
     if (currentTab !== 'detail') {
       setPreviousTab(currentTab as NavigationTab);
     }
-    setSelectedSkill(skill);
-    setCurrentTab('detail');
+    navigate('detail', skill);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    // 业务数据全部以数据库为准，文件源码内容无需本地持久化；
+    // 在线时从后端详情接口补全，保证详情页源码预览可用
+    const hasContent = (skill.fileTree || []).some(n => n.content);
+    if (!hasContent && skill.slug) {
+      api
+        .getSkill(skill.slug)
+        .then(detail => {
+          const full = mapApiSkill(detail);
+          setSkills(prev => prev.map(s => (s.id === skill.id ? full : s)));
+          setSelectedSkill(full);
+        })
+        .catch(() => {
+          /* 离线或后端不可用时保留本地精简数据 */
+        });
+    }
   };
 
   // Skill Interaction Handlers (Guarded)
@@ -455,9 +527,17 @@ export default function App() {
   // Download & Install Commands (Allowed for Everyone)
   const handleDownloadZip = async (skill: SkillItem) => {
     try {
-      addToast('info', '正在打包源码', `正在生成 ${skill.slug} 的 ZIP 文件结构...`);
-      await downloadSkillAsZip(skill.name, skill.slug, skill.fileTree);
-      
+      // 优先下载用户上传时的原始 ZIP（文件名、大小、二进制内容与上传完全一致）
+      const original = await api.downloadOriginalZip(skill.id);
+      if (original) {
+        addToast('success', '下载已就绪', `已下载原始插件包 ${original.fileName}`);
+      } else {
+        // 兜底：从文件树重建（旧数据或未保留原始 ZIP 的技能），沿用上传时的原始文件名（如有）
+        addToast('info', '正在打包源码', `正在生成 ${skill.slug} 的 ZIP 文件结构...`);
+        await downloadSkillAsZip(skill.name, skill.slug, skill.version, skill.fileTree, skill.zipFileName);
+        addToast('success', '下载已就绪', `已成功打包下载 ${skill.zipFileName || skill.slug}`);
+      }
+
       // 累加下载计数并同步至后端统计
       setSkills(prev =>
         prev.map(s => (s.id === skill.id ? { ...s, downloads: s.downloads + 1 } : s))
@@ -469,7 +549,6 @@ export default function App() {
       if (selectedSkill && selectedSkill.id === skill.id) {
         setSelectedSkill(prev => prev ? { ...prev, downloads: prev.downloads + 1 } : null);
       }
-      addToast('success', '下载已就绪', `已成功打包下载 ${skill.slug}-v_package.zip`);
     } catch (err) {
       console.error(err);
       addToast('error', '下载失败', '生成 ZIP 压缩包时发生错误');
@@ -506,7 +585,7 @@ export default function App() {
   const handleCreateSkill = async (newSkill: SkillItem) => {
     // 1. 乐观插入本地列表，用户立即可在个人中心看到提交记录
     setSkills(prev => [newSkill, ...prev]);
-    setCurrentTab('personal');
+    navigate('personal');
 
     // 2. 提交后端持久化；服务端扫描通过会自动发布至 Git 市场
     try {
@@ -525,6 +604,9 @@ export default function App() {
         readme: newSkill.readme,
         expertDomain: newSkill.expertDomain,
         fileTree: newSkill.fileTree,
+        // 原始 ZIP（base64）与上传文件名：无损入库，供下载与 Git 发布
+        zipBuffer: newSkill.zipBufferBase64,
+        zipFileName: newSkill.zipFileName,
       });
 
       // 3. 用后端返回的权威记录（含真实 ID 与服务端扫描分）替换本地临时记录
@@ -773,6 +855,41 @@ export default function App() {
   };
 
   /**
+   * 超级管理员勾选/取消某管理员的菜单权限（审核管理、风控中心）
+   * 乐观更新 allUsers 与 currentUser，失败回滚
+   * @param userId 目标用户 ID
+   * @param permissions 新的菜单权限清单
+   */
+  const handleUpdateMenuPermissions = async (userId: string, permissions: string[]) => {
+    if (!currentUser || currentUser.role !== 'super_admin') {
+      addToast('error', '越权操作', '仅超级管理员有权调整菜单权限！');
+      return;
+    }
+
+    const snapshot = allUsers;
+
+    // 乐观更新组织成员列表
+    setAllUsers(prev =>
+      prev.map(u => (u.id === userId ? { ...u, menuPermissions: permissions } : u))
+    );
+    if (currentUser.id === userId) {
+      setCurrentUser(prev => prev ? { ...prev, menuPermissions: permissions } : null);
+    }
+
+    try {
+      const updated = await api.updateUserMenuPermissions(userId, permissions);
+      const mapped = mapApiUser(updated);
+      setAllUsers(prev =>
+        prev.map(u => (u.id === userId ? { ...u, menuPermissions: mapped.menuPermissions } : u))
+      );
+      addToast('success', '菜单权限已更新', `${mapped.name} 的菜单权限已保存`);
+    } catch (error) {
+      setAllUsers(snapshot);
+      addToast('error', '菜单权限更新失败', (error as Error).message);
+    }
+  };
+
+  /**
    * 判断当前用户是否具备管理员审核权限
    */
   const isPrivilegedUser = (): boolean =>
@@ -918,7 +1035,7 @@ export default function App() {
     setSkills(prev => prev.filter(s => s.id !== id));
     if (selectedSkill && selectedSkill.id === id) {
       setSelectedSkill(null);
-      setCurrentTab('market');
+      navigate('market');
     }
 
     try {
@@ -996,9 +1113,26 @@ export default function App() {
     }
   };
 
-  // Feedback handler (Guarded)
-  const handleCreateFeedback = (fb: FeedbackItem) => {
-    setFeedbackList(prev => [fb, ...prev]);
+  // 提交建议：调后端持久化，成功后刷新列表
+  const handleCreateFeedback = async (payload: { title: string; content: string; category: string; rating: number }) => {
+    try {
+      const created = await api.createFeedback(payload);
+      setFeedbackList(prev => [mapApiFeedback(created), ...prev]);
+      addToast('success', '感谢您的建议', '您的建议已提交至建议中心，管理员会持续跟进！');
+    } catch (error) {
+      addToast('error', '提交失败', (error as Error).message);
+    }
+  };
+
+  // 删除建议：管理员可删任意建议，普通用户只能删自己的
+  const handleDeleteFeedback = async (id: string) => {
+    try {
+      await api.deleteFeedback(id);
+      setFeedbackList(prev => prev.filter(f => f.id !== id));
+      addToast('success', '建议已删除', '该建议已从建议中心移除');
+    } catch (error) {
+      addToast('error', '删除失败', (error as Error).message);
+    }
   };
 
   const pendingSkillReviewsCount = skills.filter(s => s.status === 'pending').length;
@@ -1012,6 +1146,12 @@ export default function App() {
 
   const isSuperAdmin = currentUser?.role === 'super_admin';
   const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
+  // 菜单级权限：超管恒拥有全部；管理员按 menuPermissions 清单控制「审核管理/风控中心」菜单可见性
+  const menuPermissions = currentUser?.menuPermissions ?? [];
+  const canAccessAudit =
+    isSuperAdmin || (currentUser?.role === 'admin' && menuPermissions.includes('audit'));
+  const canAccessRules =
+    isSuperAdmin || (currentUser?.role === 'admin' && menuPermissions.includes('rules'));
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
@@ -1024,21 +1164,21 @@ export default function App() {
               requireAuth('配置风控中心');
               return;
             }
-            if (!isAdmin) {
-              addToast('warning', '权限不足', '风控中心仅限超级管理员配置');
+            if (!canAccessRules) {
+              addToast('warning', '权限不足', '您未被授予风控中心访问权限');
               return;
             }
-            setCurrentTab('rules');
+            navigate('rules');
           } else if (tab === 'audit') {
             if (!currentUser) {
               requireAuth('访问审核管理中心');
               return;
             }
-            if (!isAdmin) {
-              addToast('warning', '权限不足', '审核管理中心仅限管理员访问');
+            if (!canAccessAudit) {
+              addToast('warning', '权限不足', '您未被授予审核管理访问权限');
               return;
             }
-            setCurrentTab('audit');
+            navigate('audit');
           } else if (tab === 'settings') {
             if (!currentUser) {
               requireAuth('访问权限设置中心');
@@ -1048,9 +1188,19 @@ export default function App() {
               addToast('error', '权限不足', '权限设置中心仅限超级管理员访问');
               return;
             }
-            setCurrentTab('settings');
+            navigate('settings');
+          } else if (tab === 'manage') {
+            if (!currentUser) {
+              requireAuth('进入分类和专家组管理');
+              return;
+            }
+            if (!isAdmin) {
+              addToast('warning', '权限不足', '分类和专家组管理仅限管理员访问');
+              return;
+            }
+            navigate('manage');
           } else {
-            setCurrentTab(tab);
+            navigate(tab);
           }
         }}
         onOpenUpload={() => {
@@ -1064,11 +1214,6 @@ export default function App() {
           }
         }}
         onOpenCommandPalette={() => setShowCommandPalette(true)}
-        onOpenFeedback={() => {
-          if (requireAuth('提交全站反馈')) {
-            setShowFeedbackModal(true);
-          }
-        }}
         onOpenLogin={() => {
           setLoginActionHint(undefined);
           setShowLoginModal(true);
@@ -1079,12 +1224,12 @@ export default function App() {
           setCurrentUser(user);
           // If switching to non-superadmin while on settings, redirect to market
           if (user.role !== 'super_admin' && currentTab === 'settings') {
-            setCurrentTab('market');
+            navigate('market');
           }
-          if (user.role === 'developer' && (currentTab === 'audit' || currentTab === 'rules')) {
-            setCurrentTab('market');
+          if (user.role === 'user' && (currentTab === 'audit' || currentTab === 'rules')) {
+            navigate('market');
           }
-          addToast('info', '身份已切换', `当前操作身份：${user.name} (${user.role === 'super_admin' ? '超级管理员' : user.role === 'admin' ? '管理员' : '普通开发者'})`);
+          addToast('info', '身份预览已切换', `当前预览身份：${user.name} (${user.role === 'super_admin' ? '超级管理员' : user.role === 'admin' ? '管理员' : '普通用户'})。写操作仍以登录账号身份提交，如需真实切换请退出后重新登录。`);
         }}
         onLogout={handleLogout}
         pendingReviewsCount={totalPendingReviewsCount}
@@ -1106,11 +1251,14 @@ export default function App() {
                 setShowUploadModal(true);
               }
             }}
-            onOpenDemands={() => setCurrentTab('demands')}
+            onOpenDemands={() => navigate('demands')}
             onToggleStar={handleToggleStar}
             onToggleLike={handleToggleLike}
             onDownloadZip={handleDownloadZip}
             onCopyInstallCmd={handleCopyCommand}
+            currentUser={currentUser}
+            onToast={addToast}
+            onOpenManage={() => navigate('manage')}
           />
         )}
 
@@ -1138,17 +1286,40 @@ export default function App() {
         )}
 
         {/* VIEW 3: SKILL DETAIL PAGE (FULL PAGE) */}
-        {currentTab === 'detail' && selectedSkill && (
-          <SkillDetailPage
-            skill={selectedSkill}
-            onBack={() => setCurrentTab(previousTab)}
-            onToggleStar={handleToggleStar}
-            onToggleLike={handleToggleLike}
-            onDownloadZip={handleDownloadZip}
-            onReScanSkill={handleReScanDetailSkill}
-            isScanning={isScanningDetail}
-            onCopySuccess={(msg) => addToast('success', '已复制', msg)}
-          />
+        {currentTab === 'detail' && (
+          selectedSkill ? (
+            <SkillDetailPage
+              skill={selectedSkill}
+              onBack={() => navigate(previousTab)}
+              onToggleStar={handleToggleStar}
+              onToggleLike={handleToggleLike}
+              onDownloadZip={handleDownloadZip}
+              onReScanSkill={handleReScanDetailSkill}
+              isScanning={isScanningDetail}
+              onCopySuccess={(msg) => addToast('success', '已复制', msg)}
+            />
+          ) : (
+            /* 详情页兜底：刷新直达 /skill/:slug 时技能从后端异步拉取，未找到时给出占位 */
+            <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 space-y-4 max-w-lg mx-auto my-8">
+              <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold mx-auto">
+                !
+              </div>
+              <h2 className="text-lg font-bold text-slate-900">
+                {detailLoading ? '正在加载技能详情...' : '未找到该技能'}
+              </h2>
+              <p className="text-xs text-slate-500">
+                {detailLoading
+                  ? '正在从服务器拉取技能信息，请稍候。'
+                  : '该技能可能已被删除或下架，请返回技能集市重新选择。'}
+              </p>
+              <button
+                onClick={() => navigate('market')}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold shadow-sm hover:bg-indigo-700"
+              >
+                返回技能集市
+              </button>
+            </div>
+          )
         )}
 
         {/* VIEW 4: PERSONAL CENTER (STARRED, MY SUBMISSIONS & MY DEMANDS) */}
@@ -1184,7 +1355,7 @@ export default function App() {
 
         {/* VIEW 5: ADMIN AUDIT MANAGEMENT */}
         {currentTab === 'audit' && (
-          isAdmin ? (
+          canAccessAudit ? (
             <AuditManagementView
               currentUser={currentUser!}
               skills={skills}
@@ -1209,7 +1380,7 @@ export default function App() {
               </p>
               <div className="flex items-center justify-center gap-3 pt-2">
                 <button
-                  onClick={() => setCurrentTab('market')}
+                  onClick={() => navigate('market')}
                   className="px-5 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200"
                 >
                   返回技能集市
@@ -1230,7 +1401,7 @@ export default function App() {
 
         {/* VIEW 6: RISK CONTROL CENTER (风控中心) */}
         {currentTab === 'rules' && (
-          isAdmin ? (
+          canAccessRules ? (
             <RuleManagementView
               currentUser={currentUser!}
               rules={rules}
@@ -1252,7 +1423,7 @@ export default function App() {
               </p>
               <div className="flex items-center justify-center gap-3 pt-2">
                 <button
-                  onClick={() => setCurrentTab('market')}
+                  onClick={() => navigate('market')}
                   className="px-5 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200"
                 >
                   返回技能集市
@@ -1278,6 +1449,7 @@ export default function App() {
               currentUser={currentUser}
               users={allUsers}
               onUpdateUserRole={handleUpdateUserRole}
+              onUpdateMenuPermissions={handleUpdateMenuPermissions}
               onToast={addToast}
             />
           ) : (
@@ -1291,7 +1463,7 @@ export default function App() {
               </p>
               <div className="flex items-center justify-center gap-3 pt-2">
                 <button
-                  onClick={() => setCurrentTab('market')}
+                  onClick={() => navigate('market')}
                   className="px-5 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200"
                 >
                   返回技能集市
@@ -1309,6 +1481,65 @@ export default function App() {
             </div>
           )
         )}
+
+        {/* VIEW 8: SUGGESTION CENTER (建议管理，仅管理员) */}
+        {currentTab === 'feedback' && (
+          isAdmin ? (
+            <FeedbackAdminView
+              currentUser={currentUser!}
+              feedbackList={feedbackList}
+              onDeleteFeedback={handleDeleteFeedback}
+              onOpenCreateFeedback={() => {
+                setShowFeedbackModal(true);
+              }}
+              onToast={addToast}
+            />
+          ) : (
+            <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 space-y-4 max-w-lg mx-auto">
+              <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold mx-auto">
+                !
+              </div>
+              <h2 className="text-lg font-bold text-slate-900">建议管理仅限管理员</h2>
+              <p className="text-xs text-slate-500">
+                建议管理属于企业管理员专属模块，普通用户无此入口。
+              </p>
+              <button
+                onClick={() => navigate('market')}
+                className="px-5 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200"
+              >
+                返回技能集市
+              </button>
+            </div>
+          )
+        )}
+
+        {/* VIEW 9: 分类和专家组管理（仅管理员） */}
+        {currentTab === 'manage' && (
+          isAdmin && currentUser ? (
+            <CategoryAndDomainView
+              currentUser={currentUser}
+              skills={skills}
+              onRefreshSkills={setSkills}
+              onToast={addToast}
+            />
+          ) : (
+            <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 space-y-4 max-w-lg mx-auto">
+              <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-800 flex items-center justify-center font-bold mx-auto">
+                !
+              </div>
+              <h2 className="text-lg font-bold text-slate-900">分类和专家组管理仅限管理员</h2>
+              <p className="text-xs text-slate-500">
+                分类与专家组管理属于企业管理员专属模块，普通用户无此入口。
+              </p>
+              <button
+                onClick={() => navigate('market')}
+                className="px-5 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200"
+              >
+                返回技能集市
+              </button>
+            </div>
+          )
+        )}
       </main>
 
       {/* Footer */}
@@ -1321,16 +1552,16 @@ export default function App() {
           </div>
           <div className="flex items-center gap-4">
             <button
-              onClick={() => setCurrentTab('demands')}
+              onClick={() => navigate('demands')}
               className="hover:text-indigo-600 transition-colors font-medium"
             >
               征集广场
             </button>
             <span>·</span>
-            {isAdmin && (
+            {canAccessRules && (
               <>
                 <button
-                  onClick={() => setCurrentTab('rules')}
+                  onClick={() => navigate('rules')}
                   className="hover:text-indigo-600 transition-colors font-medium"
                 >
                   风控中心
@@ -1341,7 +1572,7 @@ export default function App() {
             {currentUser && (
               <>
                 <button
-                  onClick={() => setCurrentTab('personal')}
+                  onClick={() => navigate('personal')}
                   className="hover:text-indigo-600 transition-colors font-medium"
                 >
                   个人中心
@@ -1370,7 +1601,6 @@ export default function App() {
           isOpen={showLoginModal}
           onClose={() => setShowLoginModal(false)}
           onLogin={handleLogin}
-          allUsers={allUsers}
           actionHint={loginActionHint}
         />
       )}
@@ -1379,8 +1609,6 @@ export default function App() {
       {showUploadModal && currentUser && (
         <UploadSkillModal
           currentUser={currentUser}
-          rules={rules}
-          deepseekConfig={deepseekConfig}
           onClose={() => setShowUploadModal(false)}
           onSubmit={handleCreateSkill}
           onToast={addToast}
@@ -1419,22 +1647,6 @@ export default function App() {
         />
       )}
 
-      {/* 5. Rule Management Modal (Admin) */}
-      {showRuleModal && isAdmin && (
-        <RuleManagementModal
-          rules={rules}
-          deepseekConfig={deepseekConfig}
-          onSaveDeepSeekConfig={(cfg) => {
-            setDeepseekConfig(cfg);
-          }}
-          onClose={() => setShowRuleModal(false)}
-          onSaveRule={handleSaveRule}
-          onDeleteRule={handleDeleteRule}
-          onToggleRule={handleToggleRule}
-          onToast={addToast}
-        />
-      )}
-
       {/* 6. Feedback Modal */}
       {showFeedbackModal && currentUser && (
         <FeedbackModal
@@ -1462,26 +1674,29 @@ export default function App() {
               requireAuth('配置风控中心');
               return;
             }
-            if (isAdmin) setCurrentTab('rules');
-            else addToast('warning', '权限不足', '风控中心仅限超级管理员配置');
+            if (canAccessRules) navigate('rules');
+            else addToast('warning', '权限不足', '风控中心仅限管理员访问');
           }
           if (tab === 'audit') {
             if (!currentUser) {
               requireAuth('访问审核管理中心');
               return;
             }
-            if (isAdmin) setCurrentTab('audit');
+            if (canAccessAudit) navigate('audit');
             else addToast('warning', '权限不足', '审核管理中心仅限管理员访问');
           }
         }}
       />
 
       {/* 8. Floating Back to Top and Feedback Widget */}
-      <BackToTop onOpenFeedback={() => {
-        if (requireAuth('提交全站反馈')) {
-          setShowFeedbackModal(true);
-        }
-      }} />
+      <BackToTop
+        showSuggestionButton={isAdmin}
+        onOpenFeedback={() => {
+          if (requireAuth('查看建议中心')) {
+            navigate('feedback');
+          }
+        }}
+      />
 
       {/* 9. Toast Alerts */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />

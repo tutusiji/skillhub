@@ -8,6 +8,10 @@ import { SkillEntity } from './entities/skill.entity';
 import { AuditRuleEntity } from './entities/audit-rule.entity';
 import { AuditReportEntity } from './entities/audit-report.entity';
 import { SkillDemandEntity } from './entities/skill-demand.entity';
+import { LlmConfigEntity } from './entities/llm-config.entity';
+import { FeedbackEntity } from './entities/feedback.entity';
+import { SkillCategoryEntity } from './entities/skill-category.entity';
+import { ExpertDomainEntity } from './entities/expert-domain.entity';
 
 /**
  * 数据库连接与 ORM 配置模块
@@ -33,6 +37,10 @@ import { SkillDemandEntity } from './entities/skill-demand.entity';
           AuditRuleEntity,
           AuditReportEntity,
           SkillDemandEntity,
+          LlmConfigEntity,
+          FeedbackEntity,
+          SkillCategoryEntity,
+          ExpertDomainEntity,
         ];
 
         if (dbType === 'postgres' || configService.get<string>('DATABASE_URL')) {
@@ -67,6 +75,10 @@ import { SkillDemandEntity } from './entities/skill-demand.entity';
       AuditRuleEntity,
       AuditReportEntity,
       SkillDemandEntity,
+      LlmConfigEntity,
+      FeedbackEntity,
+      SkillCategoryEntity,
+      ExpertDomainEntity,
     ]),
   ],
   exports: [TypeOrmModule],

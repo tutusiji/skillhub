@@ -1,16 +1,16 @@
 import React, { useState } from 'react';
 import { X, MessageSquarePlus, Star, Send } from 'lucide-react';
-import { FeedbackItem, UserAccount } from '../types';
+import { UserAccount } from '../types';
 
 interface FeedbackModalProps {
   currentUser: UserAccount;
   onClose: () => void;
-  onSubmit: (feedback: FeedbackItem) => void;
+  /** 提交建议表单，由上层调用后端持久化 */
+  onSubmit: (payload: { title: string; content: string; category: string; rating: number }) => void;
   onToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, message: string) => void;
 }
 
 export const FeedbackModal: React.FC<FeedbackModalProps> = ({
-  currentUser,
   onClose,
   onSubmit,
   onToast
@@ -23,24 +23,16 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !content.trim()) {
-      onToast('warning', '请填写完整', '反馈标题与详细内容不能为空');
+      onToast('warning', '请填写完整', '建议主题与详细内容不能为空');
       return;
     }
 
-    const newItem: FeedbackItem = {
-      id: `fb-${Date.now()}`,
-      userName: currentUser.name,
-      userEmail: currentUser.email,
-      category,
-      rating,
+    onSubmit({
       title: title.trim(),
       content: content.trim(),
-      createdAt: new Date().toISOString(),
-      status: 'pending'
-    };
-
-    onSubmit(newItem);
-    onToast('success', '感谢您的反馈', '您的建议已提交至 SkillHub 平台研发与架构治理委员会！');
+      category,
+      rating,
+    });
     onClose();
   };
 
@@ -54,7 +46,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({
         <div className="p-5 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <MessageSquarePlus className="w-5 h-5 text-indigo-600" />
-            <h3 className="text-base font-bold text-slate-900">全站建议与需求反馈</h3>
+            <h3 className="text-base font-bold text-slate-900">提交建议</h3>
           </div>
           <button
             onClick={onClose}
@@ -93,7 +85,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({
 
           <div>
             <label className="block font-bold text-slate-800 mb-1">
-              反馈类别
+              建议类别
             </label>
             <select
               value={category}
@@ -110,7 +102,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({
 
           <div>
             <label className="block font-bold text-slate-800 mb-1">
-              反馈主题 <span className="text-rose-500">*</span>
+              建议主题 <span className="text-rose-500">*</span>
             </label>
             <input
               type="text"
@@ -147,7 +139,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({
               className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm"
             >
               <Send className="w-3.5 h-3.5" />
-              <span>提交反馈</span>
+              <span>提交建议</span>
             </button>
           </div>
         </form>

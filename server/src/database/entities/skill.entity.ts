@@ -97,6 +97,25 @@ export class SkillEntity {
   @Column({ name: 'expert_domain', length: 50, nullable: true })
   expertDomain: string;
 
+  /**
+   * 归属的专家组/岗位领域清单（标签概念，一个技能可属于多个专家组）
+   * 由管理员在「分类和专家组管理」中维护；expertDomain 保留为详情页主领域兼容
+   */
+  @Column('simple-json', { name: 'expert_domains', default: '[]' })
+  expertDomains: string[];
+
+  /**
+   * 用户上传的原始 ZIP 压缩包（base64 编码）
+   * 保留它才能无损还原二进制文件（图片/字体等），供下载与 Git 市场发布使用；
+   * fileTree 仅存文本内容与目录结构，二进制文件在其中的文本表示是不可逆的
+   */
+  @Column({ name: 'zip_blob', type: 'text', nullable: true })
+  zipBlob: string | null;
+
+  /** 上传时的原始 ZIP 文件名（下载时优先使用，如 ui-ux-pro-max-skill-2.11.0.zip） */
+  @Column({ name: 'zip_file_name', length: 255, nullable: true })
+  zipFileName: string | null;
+
   /** 双引擎风控综合评分 (0~100) */
   @Column({ default: 100 })
   auditScore: number;

@@ -1,11 +1,17 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { DatabaseModule } from './database/database.module';
 import { GitMarketModule } from './modules/git-market/git-market.module';
 import { SkillsModule } from './modules/skills/skills.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { AuthGuard } from './modules/auth/auth.guard';
 import { DemandsModule } from './modules/demands/demands.module';
+import { FeedbackModule } from './modules/feedback/feedback.module';
+import { DemoDataModule } from './modules/demo-data/demo-data.module';
+import { SkillCategoryModule } from './modules/skill-categories/skill-category.module';
+import { ExpertDomainModule } from './modules/expert-domains/expert-domain.module';
 
 /**
  * SkillHub 应用程序根模块
@@ -23,8 +29,19 @@ import { DemandsModule } from './modules/demands/demands.module';
     SkillsModule,
     AuditModule,
     DemandsModule,
+    FeedbackModule,
+    DemoDataModule,
+    SkillCategoryModule,
+    ExpertDomainModule,
   ],
   controllers: [],
-  providers: [],
+  providers: [
+    // 全局鉴权守卫：非匿名白名单路径必须携带有效令牌
+    // 此前 AuthGuard 虽已实现却从未注册，等于形同虚设
+    {
+      provide: APP_GUARD,
+      useClass: AuthGuard,
+    },
+  ],
 })
 export class AppModule {}

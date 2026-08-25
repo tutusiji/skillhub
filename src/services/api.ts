@@ -2,10 +2,12 @@ import type {
   AuditRule,
   ClientPlatform,
   ExpertDomain,
+  FeedbackItem,
   FileTreeNode,
   RuleSeverity,
   RuleType,
   SkillCategory,
+  SkillCategoryItem,
   SkillDemand,
   SkillDemandCandidate,
   SkillItem,
@@ -127,10 +129,13 @@ export interface ApiSkill {
   fileTree?: RawFileTreeNode[];
   readme?: string;
   expertDomain?: string;
+  expertDomains?: string[];
   auditScore?: number;
   reviewedBy?: string | null;
   reviewedAt?: string | null;
   adminFeedback?: string | null;
+  zipFileName?: string | null;
+  zipBlob?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -144,6 +149,7 @@ export function mapApiSkill(skill: ApiSkill): SkillItem {
     version: skill.version ?? 'v1.0.0',
     description: skill.description,
     category: skill.category as SkillCategory,
+    zipFileName: skill.zipFileName ?? undefined,
     clients: (skill.clients ?? ['claude']) as ClientPlatform[],
     author: {
       name: skill.author,
@@ -161,6 +167,7 @@ export function mapApiSkill(skill: ApiSkill): SkillItem {
     permissions: skill.permissions ?? [],
     readme: skill.readme || skill.description,
     expertDomain: (skill.expertDomain as SkillItem['expertDomain']) ?? undefined,
+    expertDomains: Array.isArray(skill.expertDomains) ? skill.expertDomains : [],
     fileTree: normalizeFileTree(skill.fileTree ?? []),
     installCommands: skill.installCommands,
     auditResults: {
@@ -180,6 +187,10 @@ export interface ApiUser {
   id: string;
   name: string;
   email: string;
+  employeeId?: string | null;
+  loginName?: string | null;
+  authProvider?: string;
+  menuPermissions?: string[];
   role: string;
   department: string;
   avatar?: string;
@@ -191,12 +202,79 @@ export function mapApiUser(user: ApiUser): UserAccount {
     id: user.id,
     name: user.name,
     email: user.email,
+    employeeId: user.employeeId ?? null,
+    loginName: user.loginName ?? null,
+    authProvider: user.authProvider === 'oss' ? 'oss' : 'password',
+    menuPermissions: Array.isArray(user.menuPermissions) ? user.menuPermissions : [],
     role: user.role as UserRole,
     avatar: user.avatar ?? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
     department: user.department,
     joinedAt: new Date().toISOString().split('T')[0],
     points: user.points ?? 10000,
   };
+}
+
+/** 后端建议记录（映射自 feedback 表） */
+export interface ApiFeedback {
+  id: string;
+  title: string;
+  content: string;
+  category: string;
+  rating: number;
+  submitterId: string;
+  submitterName: string;
+  submitterEmployeeId: string | null;
+  submitterAvatar: string;
+  submitterDepartment: string | null;
+  createdAt: string;
+}
+
+/** 后端建议记录映射为前端 FeedbackItem */
+export function mapApiFeedback(item: ApiFeedback): FeedbackItem {
+  return {
+    id: item.id,
+    userName: item.submitterName,
+    userEmail: item.submitterEmployeeId
+      ? `${item.submitterEmployeeId}@skillhub.corp`
+      : '',
+    category: (['feature', 'bug', 'security', 'experience', 'other'].includes(item.category)
+      ? item.category
+      : 'feature') as FeedbackItem['category'],
+    rating: item.rating,
+    title: item.title,
+    content: item.content,
+    createdAt: new Date(item.createdAt).toISOString(),
+    status: 'pending',
+    submitterEmployeeId: item.submitterEmployeeId ?? undefined,
+    submitterDepartment: item.submitterDepartment ?? undefined,
+    submitterAvatar: item.submitterAvatar || undefined,
+  };
+}
+
+/** 后端专家组记录（映射自 expert_domains 表） */
+export interface ApiExpertDomain {
+  id: string;
+  name: string;
+  shortLabel: string;
+  description: string;
+  iconName: string;
+  badgeBg: string;
+  badgeText: string;
+  badgeBorder: string;
+  sortOrder: number;
+}
+
+/** 专家组创建/更新载荷（可省略的字段用 undefined 表示不修改） */
+export interface ExpertDomainPayload {
+  id?: string;
+  name?: string;
+  shortLabel?: string;
+  description?: string;
+  iconName?: string;
+  badgeBg?: string;
+  badgeText?: string;
+  badgeBorder?: string;
+  sortOrder?: number;
 }
 
 export interface ApiAuditRule {
@@ -284,9 +362,71 @@ export function mapApiDemand(demand: ApiSkillDemand): SkillDemand {
   };
 }
 
+/** 后端双引擎沙箱扫描返回的 LLM 语义研判结论 */
+export interface ApiLlmVerdict {
+  score: number;
+  confidence: number;
+  status: 'passed' | 'warning' | 'failed';
+  summary: string;
+  reasoning: string[];
+  suggestions: string[];
+  engine?: 'llm' | 'heuristic';
+  model?: string;
+  latencyMs?: number;
+  degradedReason?: string;
+}
+
+/** 后端双引擎沙箱扫描结果 */
+export interface ApiSandboxScanResult {
+  score: number;
+  status: 'passed' | 'warning' | 'failed';
+  durationMs: number;
+  regexHits: Array<{
+    ruleId: string;
+    ruleName: string;
+    severity: string;
+    lineHint?: string;
+    matchSnippet?: string;
+  }>;
+  llmVerdict: ApiLlmVerdict;
+}
+
+/** 后端返回的 LLM 审核引擎配置视图 (apiKey 仅有掩码，无明文) */
+export interface ApiLlmConfig {
+  baseUrl: string;
+  apiKeyMask: string;
+  hasApiKey: boolean;
+  modelName: string;
+  temperature: number;
+  maxTokens: number;
+  systemPrompt: string;
+  timeoutMs: number;
+  maxRetries: number;
+  isEnabled: boolean;
+  lastTestedAt: string | null;
+  testStatus: string;
+  testMessage: string | null;
+  updatedAt: string | null;
+}
+
+/** LLM 网关连通性测试结果 */
+export interface ApiLlmTestResult {
+  success: boolean;
+  latencyMs: number;
+  message: string;
+  model?: string;
+}
+
 export const api = {
   async listSkills(): Promise<ApiSkill[]> {
     return apiFetch<ApiSkill[]>('/api/v1/skills');
+  },
+  /**
+   * 按 slug 或 ID 获取技能详情（含完整文件内容，用于详情页源码预览）
+   * @param slugOrId 技能标识
+   */
+  async getSkill(slugOrId: string): Promise<ApiSkill> {
+    return apiFetch<ApiSkill>(`/api/v1/skills/${encodeURIComponent(slugOrId)}`);
   },
   async listUsers(): Promise<ApiUser[]> {
     return apiFetch<ApiUser[]>('/api/v1/auth/users');
@@ -297,18 +437,40 @@ export const api = {
   async profile(): Promise<ApiUser> {
     return apiFetch<ApiUser>('/api/v1/auth/me');
   },
-  async login(email: string, password: string): Promise<{ token: string; user: ApiUser }> {
+  /**
+   * 账号密码登录
+   * @param account 登录账号：超级管理员用登录名 admin，普通员工用工号
+   * @param password 登录密码
+   */
+  async login(account: string, password: string): Promise<{ token: string; user: ApiUser }> {
     return apiFetch('/api/v1/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ account, password }),
     });
   },
+
+  /**
+   * 内部 IAM 单点登录 (OSS)：凭工号免密登录，首次登录自动开号
+   * @param employeeId 员工工号
+   */
+  async ossLogin(employeeId: string): Promise<{ token: string; user: ApiUser }> {
+    return apiFetch('/api/v1/auth/oss-login', {
+      method: 'POST',
+      body: JSON.stringify({ employeeId }),
+    });
+  },
+
+  /**
+   * 新员工自助注册
+   * 注意：角色不可指定，后端一律创建为普通用户，管理员只能由超级管理员委任
+   * @param payload 注册表单（工号、姓名、密码、部门、可选邮箱）
+   */
   async register(payload: {
+    employeeId: string;
     name: string;
-    email: string;
     password: string;
-    department: string;
-    role: UserRole;
+    department?: string;
+    email?: string;
   }): Promise<{ token: string; user: ApiUser }> {
     return apiFetch('/api/v1/auth/register', {
       method: 'POST',
@@ -335,11 +497,43 @@ export const api = {
     readme?: string;
     expertDomain?: string;
     fileTree?: unknown[];
+    /** 原始 ZIP（base64）与上传文件名，供无损下载与 Git 市场发布 */
+    zipBuffer?: string;
+    zipFileName?: string;
   }): Promise<ApiSkill> {
     return apiFetch<ApiSkill>('/api/v1/skills/upload', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  },
+
+  /**
+   * 下载技能上传时的原始 ZIP 压缩包（文件名与上传一致、二进制无损）
+   * @param id 技能 ID
+   * @returns 触发浏览器下载；无原始 ZIP 时返回 null
+   */
+  async downloadOriginalZip(id: string): Promise<{ fileName: string } | null> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/skills/${id}/zip`, {
+        headers: authHeaders(),
+      });
+      if (!res.ok) return null;
+      const disposition = res.headers.get('content-disposition') || '';
+      const match = disposition.match(/filename="([^"]+)"/);
+      const fileName = match ? decodeURIComponent(match[1]) : `${id}.zip`;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      return { fileName };
+    } catch {
+      return null;
+    }
   },
 
   /**
@@ -458,6 +652,59 @@ export const api = {
   },
 
   /**
+   * 调用后端双引擎沙箱扫描（正则规则 + 真实 LLM 语义研判）
+   * @param payload 待审核的代码或 Prompt 全文
+   * @param skillId 可选关联技能 ID，用于落库体检快照
+   */
+  async runSandboxScan(
+    payload: string,
+    skillId?: string,
+  ): Promise<ApiSandboxScanResult> {
+    return apiFetch<ApiSandboxScanResult>('/api/v1/audit/sandbox-scan', {
+      method: 'POST',
+      body: JSON.stringify({ payload, skillId }),
+    });
+  },
+
+  /**
+   * 读取 LLM 审核引擎网关配置（API Key 仅返回掩码）
+   */
+  async getLlmConfig(): Promise<ApiLlmConfig> {
+    return apiFetch<ApiLlmConfig>('/api/v1/audit/llm-config');
+  },
+
+  /**
+   * 保存 LLM 审核引擎网关配置
+   * apiKey 传 undefined 表示保持原值，传 null 表示清空凭据
+   * @param payload 待更新的配置字段
+   */
+  async updateLlmConfig(payload: {
+    baseUrl?: string;
+    apiKey?: string | null;
+    modelName?: string;
+    temperature?: number;
+    maxTokens?: number;
+    systemPrompt?: string;
+    timeoutMs?: number;
+    maxRetries?: number;
+    isEnabled?: boolean;
+  }): Promise<ApiLlmConfig> {
+    return apiFetch<ApiLlmConfig>('/api/v1/audit/llm-config', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * 触发真实的 LLM 网关连通性测试（由后端发起探测请求）
+   */
+  async testLlmConfig(): Promise<ApiLlmTestResult> {
+    return apiFetch<ApiLlmTestResult>('/api/v1/audit/llm-config/test', {
+      method: 'POST',
+    });
+  },
+
+  /**
    * 删除自定义风控规则（内置预设规则受后端保护）
    * @param id 规则 ID
    */
@@ -478,6 +725,18 @@ export const api = {
   },
 
   /**
+   * 超级管理员调整指定管理员的菜单级权限（勾选/取消 审核管理、风控中心）
+   * @param userId 目标用户 ID
+   * @param permissions 菜单权限清单，如 ['audit', 'rules']
+   */
+  async updateUserMenuPermissions(userId: string, permissions: string[]): Promise<ApiUser> {
+    return apiFetch<ApiUser>(`/api/v1/auth/users/${userId}/menu-permissions`, {
+      method: 'PATCH',
+      body: JSON.stringify({ permissions }),
+    });
+  },
+
+  /**
    * 调整用户悬赏积分余额
    * @param userId 目标用户 ID
    * @param delta 积分增量，负数为扣减
@@ -494,6 +753,133 @@ export const api = {
    */
   async listDemands(): Promise<ApiSkillDemand[]> {
     return apiFetch<ApiSkillDemand[]>('/api/v1/demands');
+  },
+
+  /**
+   * 查询建议列表：管理员看全部，普通用户只看自己的
+   */
+  async listFeedback(): Promise<ApiFeedback[]> {
+    return apiFetch<ApiFeedback[]>('/api/v1/feedback');
+  },
+
+  /**
+   * 查询技能分类标签（集市与发布表单数据源；默认仅启用中的）
+   */
+  async listSkillCategories(): Promise<SkillCategoryItem[]> {
+    return apiFetch<SkillCategoryItem[]>('/api/v1/skill-categories');
+  },
+
+  /**
+   * 查询岗位专家组列表（首页矩阵与技能归属数据源）
+   */
+  async listExpertDomains(): Promise<ApiExpertDomain[]> {
+    return apiFetch<ApiExpertDomain[]>('/api/v1/expert-domains');
+  },
+
+  /**
+   * 新增岗位专家组（管理员）
+   * @param payload 专家组数据
+   */
+  async createExpertDomain(payload: ExpertDomainPayload): Promise<ApiExpertDomain> {
+    return apiFetch<ApiExpertDomain>('/api/v1/expert-domains', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * 更新岗位专家组（管理员）
+   * @param id 专家组 key
+   * @param payload 待更新字段
+   */
+  async updateExpertDomain(id: string, payload: ExpertDomainPayload): Promise<ApiExpertDomain> {
+    return apiFetch<ApiExpertDomain>(`/api/v1/expert-domains/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * 删除岗位专家组（管理员）
+   * @param id 专家组 key
+   */
+  async deleteExpertDomain(id: string): Promise<{ success: boolean }> {
+    return apiFetch(`/api/v1/expert-domains/${id}`, { method: 'DELETE' });
+  },
+
+  /**
+   * 新增技能分类（管理员）
+   * @param payload 分类数据
+   */
+  async createSkillCategory(payload: {
+    id: string;
+    label: string;
+    sortOrder?: number;
+    isEnabled?: boolean;
+  }): Promise<SkillCategoryItem> {
+    return apiFetch<SkillCategoryItem>('/api/v1/skill-categories', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * 更新技能分类（管理员）
+   * @param id 分类 key
+   * @param payload 待更新字段
+   */
+  async updateSkillCategory(
+    id: string,
+    payload: { label?: string; sortOrder?: number; isEnabled?: boolean },
+  ): Promise<SkillCategoryItem> {
+    return apiFetch<SkillCategoryItem>(`/api/v1/skill-categories/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * 删除技能分类（管理员）
+   * @param id 分类 key
+   */
+  async deleteSkillCategory(id: string): Promise<{ success: boolean }> {
+    return apiFetch(`/api/v1/skill-categories/${id}`, { method: 'DELETE' });
+  },
+
+  /**
+   * 提交一条建议（需登录）
+   * @param payload 建议表单数据
+   */
+  async createFeedback(payload: {
+    title: string;
+    content: string;
+    category: string;
+    rating: number;
+  }): Promise<ApiFeedback> {
+    return apiFetch<ApiFeedback>('/api/v1/feedback', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * 管理员维护技能的专家组归属（专家组即标签，可属于多个）
+   * @param id 技能 ID
+   * @param domains 专家组 ID 清单
+   */
+  async updateSkillExpertDomains(id: string, domains: string[]): Promise<ApiSkill> {
+    return apiFetch<ApiSkill>(`/api/v1/skills/${id}/expert-domains`, {
+      method: 'PUT',
+      body: JSON.stringify({ domains }),
+    });
+  },
+
+  /**
+   * 删除建议：管理员可删任意建议，普通用户只能删自己的
+   * @param id 建议 ID
+   */
+  async deleteFeedback(id: string): Promise<{ success: boolean }> {
+    return apiFetch(`/api/v1/feedback/${id}`, { method: 'DELETE' });
   },
 
   /**

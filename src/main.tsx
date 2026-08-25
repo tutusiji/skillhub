@@ -27,9 +27,16 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   }
 
   handleReset = () => {
+    // 业务数据以数据库为准，本地仅保留认证令牌；重置即清掉会话令牌回到访客态并刷新
+    localStorage.removeItem('skillhub_token');
+    localStorage.removeItem('skillhub_user');
+    // 清理历史版本的业务数据缓存残留，避免旧数据干扰
     localStorage.removeItem('skillhub_skills');
     localStorage.removeItem('skillhub_rules');
     localStorage.removeItem('skillhub_feedback');
+    localStorage.removeItem('skillhub_demands');
+    localStorage.removeItem('skillhub_all_users');
+    localStorage.removeItem('skillhub_deepseek');
     window.location.reload();
   };
 

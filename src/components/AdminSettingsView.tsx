@@ -1,21 +1,21 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  Shield, 
-  ShieldCheck, 
-  UserCheck, 
-  UserX, 
-  Search, 
-  KeyRound, 
-  Users, 
-  Lock, 
-  AlertTriangle, 
-  Sparkles, 
-  CheckCircle2, 
-  Building, 
-  Coins, 
-  Check, 
-  Info,
-  ShieldAlert
+import {
+  Shield,
+  ShieldCheck,
+  UserCheck,
+  UserX,
+  Search,
+  KeyRound,
+  Users,
+  Lock,
+  Sparkles,
+  Building,
+  Coins,
+  Check,
+  ShieldAlert,
+  ListChecks,
+  Sliders,
+  ClipboardCheck,
 } from 'lucide-react';
 import { UserAccount, UserRole } from '../types';
 
@@ -23,21 +23,59 @@ interface AdminSettingsViewProps {
   currentUser: UserAccount | null;
   users: UserAccount[];
   onUpdateUserRole: (userId: string, newRole: UserRole) => void;
+  onUpdateMenuPermissions: (userId: string, permissions: string[]) => void;
   onToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, message: string) => void;
 }
+
+/** 可勾选的菜单权限定义 */
+const MENU_PERMISSION_OPTIONS: Array<{
+  key: 'audit' | 'rules';
+  label: string;
+  desc: string;
+  icon: React.ReactNode;
+}> = [
+  {
+    key: 'audit',
+    label: '审核管理',
+    desc: '技能审核、上下架与删除',
+    icon: <ClipboardCheck className="w-4 h-4" />,
+  },
+  {
+    key: 'rules',
+    label: '风控中心',
+    desc: '风控规则与大模型网关配置',
+    icon: <Sliders className="w-4 h-4" />,
+  },
+];
 
 export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
   currentUser,
   users,
   onUpdateUserRole,
+  onUpdateMenuPermissions,
   onToast
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [roleFilter, setRoleFilter] = useState<'all' | 'super_admin' | 'admin' | 'developer'>('all');
+  // 默认选中「管理员」角色筛选
+  const [roleFilter, setRoleFilter] = useState<'all' | 'super_admin' | 'admin' | 'user'>('admin');
 
   const isSuperAdmin = currentUser?.role === 'super_admin';
 
-  // Search by ID, name, department, email
+  // 当前所有管理员用户（左栏菜单权限的全局配置对象）
+  const adminUsers = users.filter(u => u.role === 'admin');
+
+  /**
+   * 左栏复选框勾选状态 = 所有管理员都已具备的菜单权限（交集）
+   * 没有管理员时默认全勾（新委任的管理员默认获得全部菜单）
+   */
+  const globalMenuPermissions = useMemo(() => {
+    if (adminUsers.length === 0) return ['audit', 'rules'];
+    return MENU_PERMISSION_OPTIONS.filter(opt =>
+      adminUsers.every(u => (u.menuPermissions || []).includes(opt.key)),
+    ).map(opt => opt.key);
+  }, [users, adminUsers]);
+
+  // 默认只展示已有权限的用户（管理员 + 超管）；输入搜索词时可匹配到普通用户，便于直接委任
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
       if (roleFilter !== 'all' && user.role !== roleFilter) {
@@ -50,12 +88,45 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
         const matchesName = user.name.toLowerCase().includes(q);
         const matchesEmail = user.email.toLowerCase().includes(q);
         const matchesDept = user.department.toLowerCase().includes(q);
-        if (!matchesId && !matchesName && !matchesEmail && !matchesDept) return false;
+        const matchesEmp = (user.employeeId || '').toLowerCase().includes(q);
+        if (!matchesId && !matchesName && !matchesEmail && !matchesDept && !matchesEmp) return false;
+      } else if (roleFilter === 'all' && user.role !== 'admin' && user.role !== 'super_admin') {
+        // 无任何筛选时只列出已有权限的用户
+        return false;
       }
 
       return true;
     });
   }, [users, searchQuery, roleFilter]);
+
+  /**
+   * 左栏全局菜单权限开关：勾选/取消对所有管理员生效
+   * @param key 菜单权限键
+   * @param checked 是否勾选
+   */
+  const handleToggleGlobalMenuPermission = (key: 'audit' | 'rules', checked: boolean) => {
+    if (!isSuperAdmin) {
+      onToast('error', '权限不足', '仅超级管理员具备调整菜单权限的能力');
+      return;
+    }
+    if (adminUsers.length === 0) {
+      onToast('warning', '暂无管理员', '当前没有管理员，委任管理员后该菜单权限将自动生效');
+      return;
+    }
+    // 批量应用到所有管理员（超管恒全量，不受影响）
+    for (const admin of adminUsers) {
+      const current = Array.isArray(admin.menuPermissions) ? admin.menuPermissions : [];
+      const next = checked
+        ? [...new Set([...current, key])]
+        : current.filter(p => p !== key);
+      onUpdateMenuPermissions(admin.id, next);
+    }
+    onToast(
+      checked ? 'success' : 'info',
+      checked ? '菜单权限已授予' : '菜单权限已收回',
+      `${MENU_PERMISSION_OPTIONS.find(o => o.key === key)?.label} 已${checked ? '对所有管理员开放' : '从所有管理员移除'}`
+    );
+  };
 
   const handlePromoteToAdmin = (targetUser: UserAccount) => {
     if (!isSuperAdmin) {
@@ -68,9 +139,9 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
       return;
     }
 
-    if (window.confirm(`确定将用户「${targetUser.name}」(ID: ${targetUser.id}) 设置为系统管理员吗？\n该用户将获得技能审核、安全风控和需求审批等全部管理权限（但无法继续设置其他管理员）。`)) {
+    if (window.confirm(`确定将用户「${targetUser.name}」(工号: ${targetUser.employeeId || '-'}) 设为管理员吗？\n该用户将获得技能审核、安全风控和需求审批等全部管理权限（但无法继续设置其他管理员）。`)) {
       onUpdateUserRole(targetUser.id, 'admin');
-      onToast('success', '管理员委任成功', `已成功将「${targetUser.name}」设置为系统管理员`);
+      onToast('success', '管理员委任成功', `已成功将「${targetUser.name}」设为管理员`);
     }
   };
 
@@ -85,9 +156,9 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
       return;
     }
 
-    if (window.confirm(`确定撤销用户「${targetUser.name}」(ID: ${targetUser.id}) 的管理员权限吗？\n其角色将被重置为普通开发者。`)) {
-      onUpdateUserRole(targetUser.id, 'developer');
-      onToast('info', '权限已撤销', `已将「${targetUser.name}」的管理员权限收回并重置为普通开发者`);
+    if (window.confirm(`确定撤销用户「${targetUser.name}」(工号: ${targetUser.employeeId || '-'}) 的管理员权限吗？\n其角色将被重置为普通用户。`)) {
+      onUpdateUserRole(targetUser.id, 'user');
+      onToast('info', '权限已撤销', `已将「${targetUser.name}」的管理员权限收回并重置为普通用户`);
     }
   };
 
@@ -110,7 +181,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
 
   const superAdminCount = users.filter(u => u.role === 'super_admin').length;
   const adminCount = users.filter(u => u.role === 'admin').length;
-  const developerCount = users.filter(u => u.role === 'developer').length;
+  const userCount = users.filter(u => u.role === 'user').length;
 
   return (
     <div className="space-y-6 pb-12 animate-in fade-in duration-200 text-left">
@@ -143,8 +214,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
               <div className="text-lg font-black text-indigo-300">{adminCount}</div>
             </div>
             <div className="px-3 py-1">
-              <div className="text-[10px] text-indigo-200">普通开发者</div>
-              <div className="text-lg font-black text-white">{developerCount}</div>
+              <div className="text-[10px] text-indigo-200">普通用户</div>
+              <div className="text-lg font-black text-white">{userCount}</div>
             </div>
           </div>
         </div>
@@ -158,60 +229,105 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
           <p className="text-slate-600 leading-relaxed">
             • <strong>超级管理员 (Super Admin)</strong>：系统最高决策者，唯一具备委任/撤销系统管理员权限的主体，同时具备风控配置与全库审查能力。<br />
             • <strong>管理员 (Admin)</strong>：拥有全部技能发布审核、风控中心规则管理与征集需求审批权限，但<strong>不能设置或授权他人</strong>。<br />
-            • <strong>普通开发者 (Developer)</strong>：享有技能检索、发布征集需求、揭榜响应、插件安装等基础业务功能。
+            • <strong>普通用户 (User)</strong>：享有技能检索、发布征集需求、揭榜响应、插件安装等基础业务功能。
           </p>
         </div>
       </div>
 
-      {/* Filter and User Search Toolbar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs">
-        {/* Search by User ID or Name */}
-        <div className="relative w-full sm:w-96">
-          <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="搜索用户 ID (如 user-2)、姓名、邮箱、部门..."
-            className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs text-slate-800"
-          />
+      {/* 左右分栏：左栏管理员菜单列表，右栏用户列表 */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* LEFT: 管理员菜单列表 */}
+        <div className="lg:col-span-3 bg-white rounded-3xl border border-slate-200 shadow-2xs overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+            <ListChecks className="w-4 h-4 text-indigo-600" />
+            <h3 className="text-sm font-bold text-slate-900">管理员菜单</h3>
+          </div>
+          <div className="p-3 space-y-2">
+            {MENU_PERMISSION_OPTIONS.map(opt => {
+              const checked = globalMenuPermissions.includes(opt.key);
+              return (
+                <label
+                  key={opt.key}
+                  className={`flex items-start gap-3 p-3 rounded-2xl border cursor-pointer transition-all select-none ${
+                    checked
+                      ? 'bg-indigo-50 border-indigo-200'
+                      : 'bg-slate-50 border-slate-200 hover:border-indigo-300'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={e => handleToggleGlobalMenuPermission(opt.key, e.target.checked)}
+                    className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <span className="text-indigo-600">{opt.icon}</span>
+                      {opt.label}
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">{opt.desc}</div>
+                  </div>
+                </label>
+              );
+            })}
+
+            <div className="pt-2 px-1 text-[11px] text-slate-400 leading-relaxed">
+              勾选的菜单对全体管理员可见；取消勾选后，管理员登录时将看不到该菜单。
+            </div>
+          </div>
         </div>
 
-        {/* Role Filter Tabs */}
-        <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
-          <span className="text-xs text-slate-400 mr-1">角色筛选：</span>
-          {[
-            { id: 'all', label: '全部用户' },
-            { id: 'admin', label: '管理员' },
-            { id: 'developer', label: '普通开发者' },
-            { id: 'super_admin', label: '超级管理员' }
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setRoleFilter(tab.id as any)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                roleFilter === tab.id
-                  ? 'bg-indigo-600 text-white shadow-2xs'
-                  : 'bg-slate-100/80 text-slate-600 hover:bg-slate-200/80'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
+        {/* RIGHT: 用户列表 */}
+        <div className="lg:col-span-9 space-y-4">
+          {/* Filter and User Search Toolbar */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs">
+            {/* Search by User ID or Name */}
+            <div className="relative w-full sm:w-96">
+              <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="搜索工号、姓名、邮箱、部门..."
+                className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs text-slate-800"
+              />
+            </div>
 
-      {/* Users Table / List */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-2xs overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Users className="w-4 h-4 text-indigo-600" />
-            <h3 className="text-sm font-bold text-slate-900">企业用户权限列表</h3>
+            {/* Role Filter Tabs */}
+            <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
+              <span className="text-xs text-slate-400 mr-1">角色筛选：</span>
+              {[
+                { id: 'all', label: '全部用户' },
+                { id: 'admin', label: '管理员' },
+                { id: 'user', label: '普通用户' },
+                { id: 'super_admin', label: '超级管理员' }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setRoleFilter(tab.id as any)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    roleFilter === tab.id
+                      ? 'bg-indigo-600 text-white shadow-2xs'
+                      : 'bg-slate-100/80 text-slate-600 hover:bg-slate-200/80'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Users Table / List */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xs overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-indigo-600" />
+                <h3 className="text-sm font-bold text-slate-900">企业用户权限列表</h3>
             <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-bold">
               {filteredUsers.length} 位
             </span>
           </div>
-          <span className="text-xs text-slate-400">支持直接根据用户工号 ID 进行授权操作</span>
+          <span className="text-xs text-slate-400">支持直接根据员工工号搜索并授权，已注册与 IAM 登录开号的用户均可检索</span>
         </div>
 
         <div className="divide-y divide-slate-100">
@@ -244,7 +360,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                         
                         {/* User ID Pill */}
                         <code className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 font-mono text-[11px] border border-slate-200">
-                          ID: {user.id}
+                          工号: {user.employeeId || '—'}
                         </code>
 
                         {/* Role Badge */}
@@ -260,11 +376,20 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                             系统管理员
                           </span>
                         )}
-                        {user.role === 'developer' && (
+                        {user.role === 'user' && (
                           <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-medium">
-                            普通开发者
+                            普通用户
                           </span>
                         )}
+
+                        {/* Auth Provider Badge */}
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          user.authProvider === 'oss'
+                            ? 'bg-teal-50 text-teal-700 border border-teal-200'
+                            : 'bg-violet-50 text-violet-700 border border-violet-200'
+                        }`}>
+                          {user.authProvider === 'oss' ? 'IAM 登录' : '密码账号'}
+                        </span>
 
                         {isSelf && (
                           <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-[10px] font-bold">
@@ -287,7 +412,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Actions Column */}
+                  {/* Actions Column：管理员显示「解除管理员」，非管理员显示「设为管理员」 */}
                   <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
                     {isSuper ? (
                       <div className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-400 text-xs font-bold flex items-center gap-1.5 cursor-not-allowed">
@@ -300,7 +425,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                         className="px-3.5 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition-all flex items-center gap-1.5"
                       >
                         <UserX className="w-3.5 h-3.5" />
-                        <span>撤销管理员身份</span>
+                        <span>解除管理员</span>
                       </button>
                     ) : (
                       <button
@@ -308,7 +433,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                         className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95"
                       >
                         <UserCheck className="w-3.5 h-3.5" />
-                        <span>设为系统管理员</span>
+                        <span>设为管理员</span>
                       </button>
                     )}
                   </div>
@@ -316,6 +441,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
               );
             })
           )}
+        </div>
+        </div>
         </div>
       </div>
     </div>

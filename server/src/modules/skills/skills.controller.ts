@@ -2,24 +2,33 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Patch,
   Delete,
   Body,
   Param,
   Query,
   Req,
+  Res,
   BadRequestException,
+  ForbiddenException,
+  UnauthorizedException,
+  NotFoundException,
 } from '@nestjs/common';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { SkillsService } from './skills.service';
 import { SkillEntity } from '../../database/entities/skill.entity';
+import { AuthService, UserSession } from '../auth/auth.service';
 
 /**
  * 技能集市与插件生命周期 API 控制器
  */
 @Controller('api/v1/skills')
 export class SkillsController {
-  constructor(private readonly skillsService: SkillsService) {}
+  constructor(
+    private readonly skillsService: SkillsService,
+    private readonly authService: AuthService,
+  ) {}
 
   /**
    * 获取技能市场列表
@@ -50,25 +59,26 @@ export class SkillsController {
    * @param body 包含名称、简介、分类与源码信息的请求体
    */
   @Post('upload')
-  async createSkill(@Body() body: any): Promise<SkillEntity> {
+  async createSkill(
+    @Body() body: any,
+    @Req() req: Request,
+  ): Promise<SkillEntity> {
+    this.resolveSession(req);
     return this.skillsService.createSkill(body);
   }
 
   /**
-   * 超级管理员审核通过指定技能，并触发 Git Commit 发布流水线
+   * 管理员审核通过指定技能，并触发 Git Commit 发布流水线
    * @param id 技能 ID
    */
   @Post(':id/approve')
   async approveSkill(
     @Param('id') id: string,
-    @Body() body: { reviewer?: string; feedback?: string } = {},
+    @Body() body: { feedback?: string } = {},
     @Req() req?: Request,
   ): Promise<SkillEntity> {
-    return this.skillsService.approveSkill(
-      id,
-      body.reviewer || (req as any)?.user?.name,
-      body.feedback,
-    );
+    const operator = this.assertPrivileged(req, '审核技能');
+    return this.skillsService.approveSkill(id, operator.name, body.feedback);
   }
 
   /**
@@ -79,17 +89,14 @@ export class SkillsController {
   @Post(':id/reject')
   async rejectSkill(
     @Param('id') id: string,
-    @Body() body: { reviewer?: string; feedback?: string } = {},
+    @Body() body: { feedback?: string } = {},
     @Req() req?: Request,
   ): Promise<SkillEntity> {
+    const operator = this.assertPrivileged(req, '驳回技能');
     if (!body.feedback || !body.feedback.trim()) {
       throw new BadRequestException('驳回技能必须填写具体理由');
     }
-    return this.skillsService.rejectSkill(
-      id,
-      body.reviewer || (req as any)?.user?.name,
-      body.feedback,
-    );
+    return this.skillsService.rejectSkill(id, operator.name, body.feedback);
   }
 
   /**
@@ -100,14 +107,11 @@ export class SkillsController {
   @Post(':id/delist')
   async delistSkill(
     @Param('id') id: string,
-    @Body() body: { reviewer?: string; reason?: string } = {},
+    @Body() body: { reason?: string } = {},
     @Req() req?: Request,
   ): Promise<SkillEntity> {
-    return this.skillsService.delistSkill(
-      id,
-      body.reviewer || (req as any)?.user?.name,
-      body.reason,
-    );
+    const operator = this.assertPrivileged(req, '下架技能');
+    return this.skillsService.delistSkill(id, operator.name, body.reason);
   }
 
   /**
@@ -115,15 +119,9 @@ export class SkillsController {
    * @param id 技能 ID
    */
   @Post(':id/relist')
-  async relistSkill(
-    @Param('id') id: string,
-    @Body() body: { reviewer?: string } = {},
-    @Req() req?: Request,
-  ): Promise<SkillEntity> {
-    return this.skillsService.relistSkill(
-      id,
-      body.reviewer || (req as any)?.user?.name,
-    );
+  async relistSkill(@Param('id') id: string, @Req() req?: Request): Promise<SkillEntity> {
+    const operator = this.assertPrivileged(req, '恢复技能上线');
+    return this.skillsService.relistSkill(id, operator.name);
   }
 
   /**
@@ -162,13 +160,88 @@ export class SkillsController {
   }
 
   /**
+   * 管理员维护技能的专家组归属（专家组即标签，一个技能可属于多个专家组）
+   * @param id 技能 ID
+   * @param body 专家组 ID 清单
+   */
+  @Put(':id/expert-domains')
+  async updateExpertDomains(
+    @Param('id') id: string,
+    @Body() body: { domains?: string[] },
+    @Req() req?: Request,
+  ): Promise<SkillEntity> {
+    this.assertPrivileged(req, '维护专家组归属');
+    if (!Array.isArray(body?.domains)) {
+      throw new BadRequestException('domains 必须为字符串数组');
+    }
+    return this.skillsService.updateExpertDomains(id, body.domains);
+  }
+
+  /**
+   * 下载技能上传时的原始 ZIP 压缩包（无损还原二进制文件，文件名与上传一致）
+   * 无原始 ZIP 时返回 404，前端回退到从文件树重建
+   * @param id 技能 ID
+   * @param res HTTP 响应
+   */
+  @Get(':id/zip')
+  async downloadOriginalZip(
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
+    const result = await this.skillsService.getOriginalZip(id);
+    if (!result) {
+      throw new NotFoundException('该技能没有保留原始 ZIP 压缩包');
+    }
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(result.fileName || `${id}.zip`)}"`,
+    );
+    res.send(result.buffer);
+  }
+
+  /**
    * 管理员彻底删除技能并重建 Git 市场索引
    * @param id 技能 ID
    */
   @Delete(':id')
   async deleteSkill(
     @Param('id') id: string,
+    @Req() req?: Request,
   ): Promise<{ success: boolean; id: string }> {
+    this.assertPrivileged(req, '删除技能');
     return this.skillsService.deleteSkill(id);
+  }
+
+  /**
+   * 从请求头解析并校验当前操作者身份会话
+   * @param req HTTP 请求对象
+   */
+  private resolveSession(req?: Request): UserSession {
+    const authHeader = req?.headers?.['authorization'];
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : (req?.query?.token as string);
+
+    const session = token ? this.authService.validateToken(token) : null;
+    if (!session) {
+      throw new UnauthorizedException('请先登录后再操作技能');
+    }
+    return session;
+  }
+
+  /**
+   * 断言操作者具备管理员权限
+   * 技能的审核、上下架与删除属于高危操作，此前完全没有鉴权，任何人都能下架他人技能
+   * @param req HTTP 请求对象
+   * @param action 操作描述，用于错误提示
+   */
+  private assertPrivileged(req: Request | undefined, action: string): UserSession {
+    const session = this.resolveSession(req);
+    if (session.role !== 'admin' && session.role !== 'super_admin') {
+      throw new ForbiddenException(`仅管理员有权${action}`);
+    }
+    return session;
   }
 }

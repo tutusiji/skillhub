@@ -1,24 +1,24 @@
-import React, { useState, useMemo } from 'react';
-import { 
-  Search, 
-  Terminal, 
-  Sparkles, 
-  Download, 
-  ShieldCheck, 
-  Layers, 
-  Zap, 
-  ArrowRight, 
-  Code2, 
-  CheckCircle2, 
-  Server, 
-  Bot, 
-  Coins, 
-  Palette, 
-  KanbanSquare, 
-  Cpu, 
-  HardDrive, 
-  CheckCheck, 
-  BarChart3, 
+import React, { useState, useMemo, useEffect } from 'react';
+import {
+  Search,
+  Terminal,
+  Sparkles,
+  Download,
+  ShieldCheck,
+  Layers,
+  Zap,
+  ArrowRight,
+  Code2,
+  CheckCircle2,
+  Server,
+  Bot,
+  Coins,
+  Palette,
+  KanbanSquare,
+  Cpu,
+  HardDrive,
+  CheckCheck,
+  BarChart3,
   LayoutGrid,
   List,
   Flame,
@@ -30,14 +30,18 @@ import {
   Filter,
   ArrowUpRight,
   TrendingUp,
-  FolderGit2
+  FolderGit2,
+  Tags,
 } from 'lucide-react';
-import { ClientPlatform, SkillCategory, SkillItem, ExpertDomain } from '../types';
+import { ClientPlatform, SkillCategory, SkillItem, ExpertDomain, SkillCategoryItem, UserAccount } from '../types';
 import { SkillCard } from './SkillCard';
 import { EXPERT_DOMAINS, getExpertDomainMeta } from '../data/expertDomains';
+import { api } from '../services/api';
+import { useExpertDomains } from '../hooks/useExpertDomains';
 
 interface MarketplaceViewProps {
   skills: SkillItem[];
+  currentUser?: UserAccount | null;
   onSelectSkill: (skill: SkillItem) => void;
   onOpenUpload: () => void;
   onOpenDemands?: () => void;
@@ -45,9 +49,13 @@ interface MarketplaceViewProps {
   onToggleLike: (id: string) => boolean | void;
   onDownloadZip: (skill: SkillItem) => void;
   onCopyInstallCmd: (cmd: string, clientName?: string) => void;
+  onToast?: (type: 'success' | 'error' | 'warning' | 'info', title: string, message: string) => void;
+  /** 进入「分类和专家组管理」页面 */
+  onOpenManage?: () => void;
 }
 
-const CATEGORIES: { id: 'all' | SkillCategory; label: string }[] = [
+/** 分类常量兜底（后端不可用时离线模式仍可筛选） */
+const FALLBACK_CATEGORIES: { id: 'all' | SkillCategory; label: string }[] = [
   { id: 'all', label: '全部类别' },
   { id: 'database', label: '数据库与 SQL' },
   { id: 'devops', label: 'DevOps / CI/CD' },
@@ -86,13 +94,16 @@ const DomainIcon: React.FC<{ iconName: string; className?: string }> = ({ iconNa
 
 export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
   skills,
+  currentUser,
   onSelectSkill,
   onOpenUpload,
   onOpenDemands,
   onToggleStar,
   onToggleLike,
   onDownloadZip,
-  onCopyInstallCmd
+  onCopyInstallCmd,
+  onToast,
+  onOpenManage
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDomain, setSelectedDomain] = useState<ExpertDomain | 'all'>('all');
@@ -101,6 +112,36 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
   const [sortBy, setSortBy] = useState<'popular' | 'stars' | 'newest' | 'score'>('popular');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid'); // Default to Card view
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // 分类标签：后端为数据源（管理员可管理），离线时用常量兜底
+  const [categories, setCategories] = useState<SkillCategoryItem[]>([]);
+
+  // 岗位专家组：后端为数据源，离线时回退常量
+  const { domains: expertDomains } = useExpertDomains();
+
+  useEffect(() => {
+    api
+      .listSkillCategories()
+      .then(setCategories)
+      .catch(() => {
+        /* 后端不可用时保持常量兜底 */
+      });
+  }, []);
+
+  // 分类 tab 数据：后端分类 + 「全部类别」；无后端数据时用常量兜底
+  const categoryTabs = useMemo(() => {
+    if (categories.length > 0) {
+      return [
+        { id: 'all' as const, label: '全部类别' },
+        ...categories
+          .filter(c => c.isEnabled)
+          .map(c => ({ id: c.id as SkillCategory, label: c.label })),
+      ];
+    }
+    return FALLBACK_CATEGORIES;
+  }, [categories]);
+
+  const isAdmin = !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin');
 
   const toggleClientFilter = (client: ClientPlatform) => {
     setSelectedClients(prev =>
@@ -116,9 +157,10 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
     setTimeout(() => setCopiedId(null), 1800);
   };
 
-  // Approved skills
+  // 首页仅展示已审核通过（approved）的技能
+  // 待审核（pending）、已驳回（rejected）、已下架（offline）一律不出现在集市
   const approvedSkills = useMemo(() => {
-    return skills.filter(s => s.status !== 'offline' && s.status !== 'rejected');
+    return skills.filter(s => s.status === 'approved');
   }, [skills]);
 
   // Featured Top Skills for the Home Featured Carousel
@@ -331,33 +373,31 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
           )}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2">
-          {EXPERT_DOMAINS.map(domain => {
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+          {expertDomains.map(domain => {
             const isSelected = selectedDomain === domain.id;
             const count = domainSkillCounts[domain.id] || 0;
             return (
               <button
                 key={domain.id}
                 onClick={() => setSelectedDomain(domain.id as any)}
-                className={`p-3 rounded-2xl border text-left transition-all flex flex-col justify-between ${
+                className={`p-4 rounded-2xl border text-left transition-all flex flex-col gap-2 ${
                   isSelected
                     ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-500/20 ring-2 ring-indigo-300'
                     : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-slate-50/80 text-slate-700 shadow-2xs'
                 }`}
               >
-                <div className="flex items-center justify-between mb-1.5">
-                  <DomainIcon iconName={domain.iconName} className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-indigo-600'}`} />
+                <div className="flex items-center justify-between">
+                  <DomainIcon iconName={domain.iconName} className={`w-5 h-5 ${isSelected ? 'text-white' : 'text-indigo-600'}`} />
                   <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold ${
                     isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
                   }`}>
                     {count}
                   </span>
                 </div>
-                <div>
-                  <div className="text-xs font-bold truncate">{domain.shortLabel}</div>
-                  <div className={`text-[10px] truncate mt-0.5 ${isSelected ? 'text-indigo-100' : 'text-slate-400'}`}>
-                    {domain.name.split('与')[0]}
-                  </div>
+                <div className="text-xs font-bold truncate">{domain.shortLabel}</div>
+                <div className={`text-[11px] leading-snug line-clamp-2 ${isSelected ? 'text-indigo-100' : 'text-slate-500'}`}>
+                  {domain.description}
                 </div>
               </button>
             );
@@ -422,12 +462,12 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
 
         {/* Technical Category horizontal scroll tabs */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 select-none no-scrollbar">
-          {CATEGORIES.map(cat => {
+          {categoryTabs.map(cat => {
             const isActive = selectedCategory === cat.id;
             return (
               <button
                 key={cat.id}
-                onClick={() => setSelectedCategory(cat.id)}
+                onClick={() => setSelectedCategory(cat.id as any)}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
                   isActive
                     ? 'bg-slate-900 text-white shadow-sm'
@@ -438,6 +478,18 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
               </button>
             );
           })}
+
+          {/* 管理员：分类标签管理入口 */}
+          {isAdmin && (
+            <button
+              onClick={() => onOpenManage?.()}
+              className="ml-1 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap border border-dashed border-indigo-300 text-indigo-600 hover:bg-indigo-50 flex items-center gap-1 transition-all"
+              title="分类与岗位专家组管理"
+            >
+              <Tags className="w-3.5 h-3.5" />
+              分类和专家组管理
+            </button>
+          )}
         </div>
 
         {/* Filter Bar: Search, Client compatibility, Sort */}
@@ -671,6 +723,7 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
           </div>
         )}
       </div>
+
     </div>
   );
 };

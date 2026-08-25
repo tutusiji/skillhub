@@ -2,7 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as git from 'isomorphic-git';
-import JSZip from 'jszip';
+import * as JSZip from 'jszip';
 
 export interface PluginManifestItem {
   name: string;

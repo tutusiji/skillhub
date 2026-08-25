@@ -44,6 +44,17 @@ export class AuthController {
   }
 
   /**
+   * 内部 IAM 单点登录 (OSS)：凭工号免密登录，首次登录自动开号
+   * @param body 包含员工工号的请求体
+   */
+  @Post('oss-login')
+  async ossLogin(
+    @Body() body: { employeeId?: string },
+  ): Promise<AuthResponse> {
+    return this.authService.ossLogin(body?.employeeId || '');
+  }
+
+  /**
    * 获取当前登录用户身份画像与积分信息
    * @param req HTTP 请求对象 (从 Header 中解析 Token)
    */
@@ -68,17 +79,20 @@ export class AuthController {
   }
 
   /**
-   * 获取企业用户列表 (供前端快速身份切换与人员选择)
+   * 获取企业用户列表 (供超管委任管理员与人员选择)
+   * 需登录后访问：该列表含邮箱、角色、部门与积分，不可匿名暴露
    */
   @Get('users')
-  async getAllUsers(): Promise<UserSession[]> {
+  async getAllUsers(@Req() req: Request): Promise<UserSession[]> {
+    this.resolveSession(req);
     return this.authService.getAllUsers();
   }
 
   /**
-   * 超级管理员变更指定用户的角色权限 (仅 admin / super_admin 可操作)
+   * 超级管理员委任/撤销管理员角色
+   * 仅 super_admin 可操作：若允许 admin 改角色，管理员就能自造超管、绕过任命边界
    * @param id 目标用户 ID
-   * @param body 包含新角色的请求体
+   * @param body 包含新角色的请求体 ('admin' | 'user')
    */
   @Patch('users/:id/role')
   async updateUserRole(
@@ -87,10 +101,28 @@ export class AuthController {
     @Req() req: Request,
   ): Promise<UserSession> {
     const operator = this.resolveSession(req);
-    if (operator.role !== 'admin' && operator.role !== 'super_admin') {
-      throw new ForbiddenException('仅管理员可变更组织成员角色权限');
+    if (operator.role !== 'super_admin') {
+      throw new ForbiddenException('仅超级管理员可委任或撤销管理员权限');
     }
     return this.authService.updateUserRole(id, body?.role);
+  }
+
+  /**
+   * 超级管理员调整指定管理员的菜单级权限（勾选/取消 审核管理、风控中心）
+   * @param id 目标用户 ID
+   * @param body 菜单权限清单，如 { permissions: ['audit', 'rules'] }
+   */
+  @Patch('users/:id/menu-permissions')
+  async updateUserMenuPermissions(
+    @Param('id') id: string,
+    @Body() body: { permissions?: string[] },
+    @Req() req: Request,
+  ): Promise<UserSession> {
+    const operator = this.resolveSession(req);
+    if (operator.role !== 'super_admin') {
+      throw new ForbiddenException('仅超级管理员可调整菜单权限');
+    }
+    return this.authService.updateUserMenuPermissions(id, body?.permissions || []);
   }
 
   /**

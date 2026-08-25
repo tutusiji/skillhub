@@ -13,6 +13,7 @@ import {
 } from '../../database/entities/skill-demand.entity';
 import { UserEntity } from '../../database/entities/user.entity';
 import { UserSession } from '../auth/auth.service';
+import { findByUuid, isUuid } from '../../common/db-id.util';
 
 /** 悬赏积分下限，与前端发布表单校验保持一致 */
 const MIN_BOUNTY_POINTS = 100;
@@ -136,7 +137,7 @@ export class DemandsService implements OnModuleInit {
     // 事务保证：积分扣减与需求创建同时成功或同时回滚
     return this.dataSource.transaction(async (manager) => {
       const userRepo = manager.getRepository(UserEntity);
-      const author = await userRepo.findOne({ where: { id: operator.id } });
+      const author = await findByUuid(userRepo, operator.id);
       if (!author) {
         throw new NotFoundException('未找到当前登录用户，无法发布需求');
       }
@@ -332,9 +333,7 @@ export class DemandsService implements OnModuleInit {
 
     return this.dataSource.transaction(async (manager) => {
       const userRepo = manager.getRepository(UserEntity);
-      const winner = await userRepo.findOne({
-        where: { id: candidate.submitterId },
-      });
+      const winner = await findByUuid(userRepo, candidate.submitterId);
 
       // 方案提交者账号可能已被移除，此时仅关闭需求并提示，不中断验收流程
       if (winner) {
@@ -369,7 +368,7 @@ export class DemandsService implements OnModuleInit {
     if (demand.pointsRefunded) return 0;
 
     const userRepo = manager.getRepository(UserEntity);
-    const author = await userRepo.findOne({ where: { id: demand.authorId } });
+    const author = await findByUuid(userRepo, demand.authorId);
     if (author) {
       author.points = (author.points ?? 0) + demand.bountyPoints;
       await userRepo.save(author);
@@ -383,6 +382,11 @@ export class DemandsService implements OnModuleInit {
    * @param id 需求 ID
    */
   private async getDemandOrThrow(id: string): Promise<SkillDemandEntity> {
+    // 需求主键在 Postgres 下是真正的 uuid 列，非法格式必须提前拦截，
+    // 否则驱动会抛 QueryFailedError 导致「不存在」被误报成 500
+    if (!isUuid(id)) {
+      throw new NotFoundException('未找到对应的技能征集需求');
+    }
     const demand = await this.demandRepository.findOne({ where: { id } });
     if (!demand) {
       throw new NotFoundException('未找到对应的技能征集需求');

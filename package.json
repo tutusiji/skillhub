@@ -17,7 +17,6 @@
     "test:all": "pnpm run lint && pnpm run test:regression && pnpm run test:plugin-e2e"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
     "@types/canvas-confetti": "^1.9.0",
     "@vitejs/plugin-react": "^5.0.4",

@@ -9,3 +9,6 @@ coverage/
 
 # Runtime data (SQLite DB + git marketplace repo, regenerated on server startup)
 server/storage/
+
+# ZCode agent runtime data
+.zcode/

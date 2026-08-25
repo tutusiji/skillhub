@@ -1,4 +1,13 @@
-export type UserRole = 'super_admin' | 'admin' | 'developer';
+/**
+ * 用户角色三级模型
+ * super_admin 超级管理员：唯一可委任管理员的角色，其余权限与 admin 相同
+ * admin 管理员：技能审核、风控配置、需求审批
+ * user 普通用户：检索、发布需求、揭榜、安装插件
+ */
+export type UserRole = 'super_admin' | 'admin' | 'user';
+
+/** 账号来源渠道：自助注册 / 内部 IAM 单点登录开号 */
+export type AuthProvider = 'password' | 'oss';
 
 export interface UserAccount {
   id: string;
@@ -10,6 +19,25 @@ export interface UserAccount {
   joinedAt: string;
   points: number; // 奖励积分，初始 10,000
   title?: string;
+  /** 员工工号，普通用户的登录标识；超级管理员为空 */
+  employeeId?: string | null;
+  /** 专用登录名，仅超级管理员有值 (admin) */
+  loginName?: string | null;
+  /** 账号来源渠道 */
+  authProvider?: AuthProvider;
+  /** 菜单级权限清单 ['audit', 'rules']；超管恒拥有全部（判定时兜底） */
+  menuPermissions?: string[];
+}
+
+/** 可勾选的菜单权限键：'audit' 审核管理 / 'rules' 风控中心 */
+export type MenuPermissionKey = 'audit' | 'rules';
+
+/** 技能分类标签（集市 tab 与发布表单下拉的数据源，后端可管理） */
+export interface SkillCategoryItem {
+  id: string;
+  label: string;
+  sortOrder: number;
+  isEnabled: boolean;
 }
 
 export type ExpertDomain = 
@@ -120,7 +148,13 @@ export interface SkillItem {
   version: string;
   description: string;
   category: SkillCategory;
-  expertDomain?: ExpertDomain; // 适用专家组/岗位
+  expertDomain?: ExpertDomain; // 适用专家组/岗位（主领域）
+  /** 归属的专家组清单（标签概念，可属于多个），由管理员在专家组管理中维护 */
+  expertDomains?: string[];
+  /** 上传时的原始 ZIP（base64，仅前端提交链路使用，不落前端缓存） */
+  zipBufferBase64?: string;
+  /** 上传时的原始 ZIP 文件名 */
+  zipFileName?: string;
   clients: ClientPlatform[];
   author: {
     name: string;
@@ -196,6 +230,12 @@ export interface FeedbackItem {
   content: string;
   createdAt: string;
   status: 'pending' | 'reviewed' | 'resolved';
+  /** 提交者工号（建议管理页展示用） */
+  submitterEmployeeId?: string;
+  /** 提交者部门 */
+  submitterDepartment?: string;
+  /** 提交者头像 */
+  submitterAvatar?: string;
 }
 
 export interface DeepSeekConfig {

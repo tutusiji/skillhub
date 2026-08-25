@@ -10,6 +10,8 @@
  *  5. 审核规则 CRUD 与沙箱扫描
  *  6. Claude Code 插件市场：marketplace.json / plugin.json schema 合法性、Git Smart HTTP
  *  7. 单进程模式下 SPA 与 API 共存、静态资源与敏感路径防护
+ *  8. LLM 审核引擎的真实调用与六种降级分支
+ *  9. 主键格式健壮性：PostgreSQL uuid 列对非法 id 必须收敛成 404 而非 500
  *
  * 用法： node scripts/regression-test.mjs [baseUrl]
  */
@@ -86,50 +88,95 @@ const ctx = {};
 async function testAuth() {
   group('1. 认证与用户体系');
 
-  const email = `qa-${RUN}@skillhub.corp`;
+  const empId = `${7000000 + (Date.now() % 900000)}`.slice(0, 7);
   const reg = await req('POST', '/api/v1/auth/register', {
     body: {
       name: `QA机器人-${RUN}`,
-      email,
+      employeeId: empId,
       password: 'Password123!',
       department: '质量保障部',
-      role: 'developer',
     },
   });
   check('注册新用户返回 201/200', [200, 201].includes(reg.status), `status=${reg.status} body=${JSON.stringify(reg.body).slice(0, 200)}`);
   check('注册返回访问令牌', Boolean(reg.body?.token), JSON.stringify(reg.body).slice(0, 200));
   check('注册用户初始积分已下发', Number(reg.body?.user?.points) > 0, `points=${reg.body?.user?.points}`);
+  check('注册角色固定为普通用户', reg.body?.user?.role === 'user', `role=${reg.body?.user?.role}`);
   ctx.devToken = reg.body?.token;
   ctx.devUser = reg.body?.user;
-  ctx.devEmail = email;
+  ctx.empId = empId;
 
   const dup = await req('POST', '/api/v1/auth/register', {
-    body: { name: 'dup', email, password: 'Password123!' },
+    body: { name: 'dup', employeeId: empId, password: 'Password123!' },
   });
-  check('重复邮箱注册被拒绝 (409/400)', [400, 409].includes(dup.status), `status=${dup.status}`);
+  check('重复工号注册被拒绝 (409/400)', [400, 409].includes(dup.status), `status=${dup.status}`);
 
   const weak = await req('POST', '/api/v1/auth/register', {
-    body: { name: 'weak', email: `weak-${RUN}@skillhub.corp`, password: '123' },
+    body: { name: 'weak', employeeId: `${Number(empId) + 1}`, password: '123' },
   });
   check('弱密码注册被 ValidationPipe 拦截 (400)', weak.status === 400, `status=${weak.status}`);
 
-  const badEmail = await req('POST', '/api/v1/auth/register', {
-    body: { name: 'bad', email: 'not-an-email', password: 'Password123!' },
+  const badEmp = await req('POST', '/api/v1/auth/register', {
+    body: { name: 'bad', employeeId: 'abc', password: 'Password123!' },
   });
-  check('非法邮箱格式被拦截 (400)', badEmail.status === 400, `status=${badEmail.status}`);
+  check('非法工号格式被拦截 (400)', badEmp.status === 400, `status=${badEmp.status}`);
+
+  // 注册接口不接受 role 字段，传了也必须强制为普通用户，防止自封管理员
+  const roleSelfAssign = await req('POST', '/api/v1/auth/register', {
+    body: {
+      name: '越权测试',
+      employeeId: `${Number(empId) + 2}`,
+      password: 'Password123!',
+      role: 'super_admin',
+    },
+  });
+  check('注册自封超管被强制为普通用户', roleSelfAssign.body?.user?.role === 'user', `role=${roleSelfAssign.body?.user?.role}`);
 
   const login = await req('POST', '/api/v1/auth/login', {
-    body: { email: 'admin@skillhub.corp', password: 'Password123!' },
+    body: { account: 'admin', password: 'skill@2026' },
   });
-  check('预设管理员登录成功', login.status === 200 || login.status === 201, `status=${login.status}`);
-  check('管理员角色为 admin', login.body?.user?.role === 'admin', `role=${login.body?.user?.role}`);
+  check('超级管理员登录成功', login.status === 200 || login.status === 201, `status=${login.status}`);
+  check('超级管理员角色为 super_admin', login.body?.user?.role === 'super_admin', `role=${login.body?.user?.role}`);
+  check('超级管理员登录名为 admin', login.body?.user?.loginName === 'admin', `loginName=${login.body?.user?.loginName}`);
   ctx.adminToken = login.body?.token;
   ctx.adminUser = login.body?.user;
 
+  // 工号登录：普通用户以工号为账号标识
+  const empLogin = await req('POST', '/api/v1/auth/login', {
+    body: { account: empId, password: 'Password123!' },
+  });
+  check('工号登录成功', empLogin.status === 200 || empLogin.status === 201, `status=${empLogin.status}`);
+  check('工号登录返回的账号带工号字段', empLogin.body?.user?.employeeId === empId, `employeeId=${empLogin.body?.user?.employeeId}`);
+
+  // 邮箱兜底通道仍可用（历史账号迁移保护）
+  const emailLogin = await req('POST', '/api/v1/auth/login', {
+    body: { email: 'admin@skillhub.corp', password: 'skill@2026' },
+  });
+  check('历史邮箱兜底登录可用', emailLogin.status === 200 || emailLogin.status === 201, `status=${emailLogin.status}`);
+
   const badPass = await req('POST', '/api/v1/auth/login', {
-    body: { email: 'admin@skillhub.corp', password: 'wrong-password' },
+    body: { account: 'admin', password: 'wrong-password' },
   });
   check('错误密码登录被拒绝 (401)', badPass.status === 401, `status=${badPass.status}`);
+
+  // 内部 IAM 单点登录（OSS 桩）：7 位数字工号免密登录并自动开号
+  const ossId = `${Number(empId) + 3}`.slice(0, 7);
+  const oss = await req('POST', '/api/v1/auth/oss-login', {
+    body: { employeeId: ossId },
+  });
+  check('OSS 登录自动开号成功', oss.status === 200 || oss.status === 201, `status=${oss.status}`);
+  check('OSS 账号来源渠道为 oss', oss.body?.user?.authProvider === 'oss', `provider=${oss.body?.user?.authProvider}`);
+  check('OSS 账号角色为普通用户', oss.body?.user?.role === 'user', `role=${oss.body?.user?.role}`);
+
+  const ossReject = await req('POST', '/api/v1/auth/oss-login', {
+    body: { employeeId: 'abc' },
+  });
+  check('非法工号 OSS 登录被拒 (401)', ossReject.status === 401, `status=${ossReject.status}`);
+
+  // OSS 开号的账号没有密码，不能走密码登录
+  const ossPwdLogin = await req('POST', '/api/v1/auth/login', {
+    body: { account: ossId, password: 'Password123!' },
+  });
+  check('OSS 账号不能用密码登录 (401)', ossPwdLogin.status === 401, `status=${ossPwdLogin.status}`);
 
   const me = await req('GET', '/api/v1/auth/me', { token: ctx.adminToken });
   check('/auth/me 携带令牌可获取身份', me.status === 200 && me.body?.email === 'admin@skillhub.corp', `status=${me.status}`);
@@ -140,8 +187,16 @@ async function testAuth() {
   const meBadToken = await req('GET', '/api/v1/auth/me', { token: 'garbage-token' });
   check('/auth/me 非法令牌返回 401', meBadToken.status === 401, `status=${meBadToken.status}`);
 
+  // /auth/users 现在要求登录态，不再匿名暴露组织名单
+  const usersAnon = await req('GET', '/api/v1/auth/users');
+  check('匿名拉取用户列表被拒绝 (401)', usersAnon.status === 401, `status=${usersAnon.status}`);
+
   const users = await req('GET', '/api/v1/auth/users', { token: ctx.adminToken });
   check('管理员可拉取用户列表', users.status === 200 && Array.isArray(users.body), `status=${users.status}`);
+
+  // 用户列表应包含工号与来源渠道字段（权限设置页搜索依赖）
+  const listed = Array.isArray(users.body) ? users.body.find(u => u.employeeId === empId) : null;
+  check('用户列表包含工号字段', Boolean(listed), `empId=${empId}`);
 }
 
 /**
@@ -511,6 +566,640 @@ async function testCleanup() {
 }
 
 /**
+ * 分组八：LLM 审核引擎配置与降级链路
+ * 用本地 mock 网关覆盖「正常 / markdown 包裹 / 脏返回 / 401 / 超时 / 5xx 重试」六种路径
+ */
+async function testLlmEngine() {
+  group('8. LLM 审核引擎与降级链路');
+
+  // 记录原配置，测试结束后完整恢复
+  const original = await req('GET', '/api/v1/audit/llm-config', { token: ctx.adminToken });
+  check('可读取 LLM 引擎配置', original.status === 200, `status=${original.status}`);
+  check('配置接口不回传 API Key 明文', original.body?.apiKey === undefined, `keys=${Object.keys(original.body || {})}`);
+  check('配置接口返回 apiKey 掩码字段', 'apiKeyMask' in (original.body || {}), 'apiKeyMask 缺失');
+
+  const restore = async () => {
+    await req('PUT', '/api/v1/audit/llm-config', {
+      token: ctx.adminToken,
+      body: {
+        baseUrl: original.body?.baseUrl ?? 'https://api.deepseek.com/v1',
+        modelName: original.body?.modelName ?? 'deepseek-chat',
+        temperature: original.body?.temperature ?? 0.1,
+        maxTokens: original.body?.maxTokens ?? 2048,
+        timeoutMs: original.body?.timeoutMs ?? 20000,
+        maxRetries: original.body?.maxRetries ?? 2,
+        isEnabled: original.body?.isEnabled ?? false,
+        ...(original.body?.hasApiKey ? {} : { apiKey: null }),
+      },
+    });
+  };
+
+  // 未配置凭据时不允许开启真实调用
+  await req('PUT', '/api/v1/audit/llm-config', { token: ctx.adminToken, body: { apiKey: null } });
+  const forceOn = await req('PUT', '/api/v1/audit/llm-config', {
+    token: ctx.adminToken,
+    body: { isEnabled: true },
+  });
+  check('无凭据时拒绝开启真实 LLM 调用', forceOn.body?.isEnabled === false, `isEnabled=${forceOn.body?.isEnabled}`);
+
+  const noKeyTest = await req('POST', '/api/v1/audit/llm-config/test', { token: ctx.adminToken });
+  check('无凭据连通性测试返回失败而非抛错', [200, 201].includes(noKeyTest.status) && noKeyTest.body?.success === false, `status=${noKeyTest.status}`);
+
+  const degraded = await req('POST', '/api/v1/audit/sandbox-scan', {
+    token: ctx.adminToken,
+    body: { payload: 'const a = 1;' },
+  });
+  check('未启用 LLM 时降级到本地启发式引擎', degraded.body?.llmVerdict?.engine === 'heuristic', `engine=${degraded.body?.llmVerdict?.engine}`);
+  check('降级时给出可读的降级原因', Boolean(degraded.body?.llmVerdict?.degradedReason), `reason=${degraded.body?.llmVerdict?.degradedReason}`);
+
+  // 启动本地 mock 网关覆盖真实调用各分支
+  const mock = await startMockLlmGateway();
+  if (!mock) {
+    check('启动 mock LLM 网关', false, '端口占用或无法监听，跳过真实调用分支');
+    await restore();
+    return;
+  }
+  check('启动 mock LLM 网关', true);
+
+  /**
+   * 切换 mock 网关模式并执行一次扫描
+   * @param mode mock 网关路径模式
+   * @param timeoutMs 超时配置
+   * @param maxRetries 重试次数
+   */
+  const scanWith = async (mode, timeoutMs = 4000, maxRetries = 2) => {
+    await req('PUT', '/api/v1/audit/llm-config', {
+      token: ctx.adminToken,
+      body: {
+        baseUrl: `http://127.0.0.1:${mock.port}/${mode}`,
+        apiKey: 'sk-mock-regression-key',
+        modelName: 'mock-audit-v1',
+        timeoutMs,
+        maxRetries,
+        isEnabled: true,
+      },
+    });
+    const res = await req('POST', '/api/v1/audit/sandbox-scan', {
+      token: ctx.adminToken,
+      body: { payload: 'const harmless = 1;' },
+    });
+    return res.body?.llmVerdict || {};
+  };
+
+  const okCase = await scanWith('ok');
+  check('真实 LLM 调用生效 (engine=llm)', okCase.engine === 'llm', `engine=${okCase.engine} reason=${okCase.degradedReason}`);
+  check('采用模型返回的评分而非本地默认值', okCase.score === 22, `score=${okCase.score}`);
+  check('回传模型名称与耗时', okCase.model === 'mock-audit-v1' && typeof okCase.latencyMs === 'number', `model=${okCase.model} latency=${okCase.latencyMs}`);
+  check('解析出模型给出的判定依据', (okCase.reasoning || []).length >= 2, `reasoning=${JSON.stringify(okCase.reasoning)}`);
+
+  const connOk = await req('POST', '/api/v1/audit/llm-config/test', { token: ctx.adminToken });
+  check('连通性测试对可用网关返回成功', connOk.body?.success === true, `msg=${connOk.body?.message}`);
+  const afterTest = await req('GET', '/api/v1/audit/llm-config', { token: ctx.adminToken });
+  check('自检结果已落库 (testStatus=success)', afterTest.body?.testStatus === 'success', `testStatus=${afterTest.body?.testStatus}`);
+
+  const fenced = await scanWith('fenced');
+  check('可解析 markdown 代码块包裹的 JSON', fenced.engine === 'llm' && fenced.score === 71, `engine=${fenced.engine} score=${fenced.score}`);
+
+  const garbage = await scanWith('garbage');
+  check('非 JSON 返回时降级而非崩溃', garbage.engine === 'heuristic', `engine=${garbage.engine}`);
+  check('降级原因包含解析失败说明', String(garbage.degradedReason || '').includes('无法解析'), `reason=${garbage.degradedReason}`);
+
+  const unauthorized = await scanWith('401');
+  check('4xx 凭据错误时降级', unauthorized.engine === 'heuristic', `engine=${unauthorized.engine}`);
+  check('4xx 不做无意义重试 (耗时较短)', Number(unauthorized.latencyMs) < 1500, `latency=${unauthorized.latencyMs}`);
+
+  const timedOut = await scanWith('timeout', 1500, 0);
+  check('调用超时时降级', timedOut.engine === 'heuristic', `engine=${timedOut.engine}`);
+  check('降级原因标明请求超时', String(timedOut.degradedReason || '').includes('超时'), `reason=${timedOut.degradedReason}`);
+  check('超时被 timeoutMs 有效约束', Number(timedOut.latencyMs) >= 1400 && Number(timedOut.latencyMs) < 4000, `latency=${timedOut.latencyMs}`);
+
+  const flaky = await scanWith('flaky', 4000, 3);
+  check('5xx 抖动经重试后成功', flaky.engine === 'llm', `engine=${flaky.engine} reason=${flaky.degradedReason}`);
+
+  const badConn = await req('POST', '/api/v1/audit/llm-config/test', { token: ctx.adminToken });
+  check('连通性测试接口对抖动网关不抛 500', [200, 201].includes(badConn.status), `status=${badConn.status}`);
+
+  await mock.close();
+  await restore();
+  const restored = await req('GET', '/api/v1/audit/llm-config', { token: ctx.adminToken });
+  check('测试后配置已恢复原状', restored.body?.baseUrl === (original.body?.baseUrl ?? ''), `baseUrl=${restored.body?.baseUrl}`);
+}
+
+/**
+ * 启动一个本地 mock 的 OpenAI 兼容网关，用于覆盖 LLM 调用的各类返回分支
+ * 返回 null 表示无法监听端口（沙箱限制），调用方应跳过相关用例
+ */
+async function startMockLlmGateway() {
+  const http = await import('node:http');
+  let flakyHits = 0;
+
+  const server = http.createServer((rq, rs) => {
+    let body = '';
+    rq.on('data', (c) => (body += c));
+    rq.on('end', () => {
+      const reply = (content) => {
+        rs.writeHead(200, { 'Content-Type': 'application/json' });
+        rs.end(JSON.stringify({ choices: [{ message: { content } }] }));
+      };
+
+      if (rq.url.startsWith('/ok')) {
+        // 连通性探测请求只需回 OK，审核请求返回结构化 JSON
+        if (body.includes('ping')) return reply('OK');
+        return reply(
+          JSON.stringify({
+            score: 22,
+            confidence: 0.93,
+            status: 'failed',
+            summary: '检测到 Prompt 注入与数据外发组合风险',
+            reasoning: ['存在覆盖系统指令的越狱语句', '将凭据回传至外部域名'],
+            suggestions: ['移除越狱语句并改用受控参数传入'],
+          }),
+        );
+      }
+      if (rq.url.startsWith('/fenced')) {
+        return reply(
+          '```json\n{"score": 71, "confidence": 0.8, "status": "warning", "summary": "存在权限过度申请", "reasoning": ["申请了全局写权限"], "suggestions": ["收敛为只读权限"]}\n```\n以上是分析结果。',
+        );
+      }
+      if (rq.url.startsWith('/garbage')) {
+        return reply('我觉得这段代码没什么问题，挺好的。');
+      }
+      if (rq.url.startsWith('/timeout')) {
+        return; // 永不响应，触发客户端超时
+      }
+      if (rq.url.startsWith('/401')) {
+        rs.writeHead(401, { 'Content-Type': 'application/json' });
+        return rs.end('{"error":"invalid api key"}');
+      }
+      if (rq.url.startsWith('/flaky')) {
+        flakyHits += 1;
+        // 前两次 500，第三次成功，用于验证指数退避重试
+        if (flakyHits % 3 !== 0) {
+          rs.writeHead(500);
+          return rs.end('upstream boom');
+        }
+        return reply(
+          JSON.stringify({
+            score: 90,
+            confidence: 0.9,
+            status: 'passed',
+            summary: '重试后成功',
+            reasoning: ['无风险'],
+            suggestions: [],
+          }),
+        );
+      }
+      rs.writeHead(404);
+      rs.end('nope');
+    });
+  });
+
+  const port = 17899;
+  const listened = await new Promise((resolve) => {
+    server.once('error', () => resolve(false));
+    server.listen(port, '127.0.0.1', () => resolve(true));
+  });
+  if (!listened) return null;
+
+  return {
+    port,
+    close: () => new Promise((resolve) => server.close(() => resolve(true))),
+  };
+}
+
+/**
+ * 分组九：主键格式健壮性（PostgreSQL uuid 列契约）
+ *
+ * SQLite 把 uuid 主键存成 varchar，任意字符串都能安全查询；切到 PostgreSQL 后
+ * 该列是真正的 uuid 类型，非法格式的 id 会让驱动抛 QueryFailedError 并冒泡成 500。
+ * 这里逐个覆盖所有「外部可传入 id」的接口，确保它们返回业务语义状态码而非 500。
+ */
+async function testIdRobustness() {
+  group('9. 主键格式健壮性 (Postgres uuid 契约)');
+
+  const badId = 'definitely-not-a-uuid-xyz';
+
+  // 需求侧：5 个接口都会先按 id 回源需求实体
+  const demandCases = [
+    ['DELETE', `/api/v1/demands/${badId}`, undefined, '删除'],
+    ['POST', `/api/v1/demands/${badId}/approve`, undefined, '审核通过'],
+    ['POST', `/api/v1/demands/${badId}/reject`, { reason: '回归测试' }, '驳回'],
+    ['POST', `/api/v1/demands/${badId}/candidates`, { notes: '回归测试' }, '提交方案'],
+    ['POST', `/api/v1/demands/${badId}/candidates/${badId}/accept`, undefined, '验收方案'],
+  ];
+  for (const [method, url, body, label] of demandCases) {
+    const res = await req(method, url, { token: ctx.adminToken, body });
+    check(`非法 id ${label}需求返回 404 而非 500`, res.status === 404, `status=${res.status}`);
+  }
+
+  // 用户侧：角色与积分调整同样按 uuid 主键回源
+  const roleRes = await req('PATCH', `/api/v1/auth/users/${badId}/role`, {
+    token: ctx.adminToken,
+    body: { role: 'user' },
+  });
+  check(`非法 id 变更用户角色返回 404 而非 500`, roleRes.status === 404, `status=${roleRes.status}`);
+
+  const pointsRes = await req('PATCH', `/api/v1/auth/users/${badId}/points`, {
+    token: ctx.adminToken,
+    body: { delta: 10 },
+  });
+  check(`非法 id 调整用户积分返回 404 而非 500`, pointsRes.status === 404, `status=${pointsRes.status}`);
+
+  // 鉴权后门已移除：token-dev-admin / token-dev-user 曾经任何人带上即得管理员会话
+  for (const legacy of ['token-dev-admin', 'token-dev-user']) {
+    const me = await req('GET', '/api/v1/auth/me', { token: legacy });
+    check(`历史后门 Token ${legacy} 已失效返回 401`, me.status === 401, `status=${me.status}`);
+  }
+
+  // 超级管理员角色不可通过 API 变更（防止互相夺权）
+  const superGuard = await req('PATCH', `/api/v1/auth/users/${ctx.adminUser?.id}/role`, {
+    token: ctx.adminToken,
+    body: { role: 'user' },
+  });
+  check('超级管理员角色不可被变更 (400)', superGuard.status === 400, `status=${superGuard.status}`);
+
+  // 管理员不可通过接口制造新的超级管理员（只能委任 admin/user）
+  const cannotCreateSuper = await req('PATCH', `/api/v1/auth/users/${badId}/role`, {
+    token: ctx.adminToken,
+    body: { role: 'super_admin' },
+  });
+  check('接口拒绝授予 super_admin 角色 (400)', cannotCreateSuper.status === 400, `status=${cannotCreateSuper.status}`);
+
+  const badToken = await req('GET', '/api/v1/auth/me', { token: 'totally-invalid-token' });
+  check('无效 Token 读取身份返回 401', badToken.status === 401, `status=${badToken.status}`);
+}
+
+/**
+ * 分组十：越权防护（技能审核与风控配置的权限边界）
+ * 技能审核/上下架/删除与风控规则配置此前完全没有鉴权，任何人都能下架他人技能或改写网关配置
+ */
+async function testPrivilegeBoundaries() {
+  group('10. 越权防护 (技能与风控配置权限边界)');
+
+  // 普通用户没有技能审核/下架/删除权限
+  const delSkill = await req('DELETE', '/api/v1/skills/definitely-not-exists-xyz', { token: ctx.devToken });
+  check('普通用户删除技能被拒 (403)', delSkill.status === 403, `status=${delSkill.status}`);
+
+  const delistSkill = await req('POST', '/api/v1/skills/definitely-not-exists-xyz/delist', { token: ctx.devToken });
+  check('普通用户下架技能被拒 (403)', delistSkill.status === 403, `status=${delistSkill.status}`);
+
+  const approveSkill = await req('POST', '/api/v1/skills/definitely-not-exists-xyz/approve', { token: ctx.devToken });
+  check('普通用户审核技能被拒 (403)', approveSkill.status === 403, `status=${approveSkill.status}`);
+
+  // 未登录访问技能管理接口被拒
+  const anonDelete = await req('DELETE', '/api/v1/skills/definitely-not-exists-xyz');
+  check('匿名删除技能被拒 (401)', anonDelete.status === 401, `status=${anonDelete.status}`);
+
+  // 普通用户无权修改风控规则与 LLM 网关配置
+  const userToggleRule = await req('POST', '/api/v1/audit/rules/whatever/toggle', { token: ctx.devToken });
+  check('普通用户启停风控规则被拒 (403)', userToggleRule.status === 403, `status=${userToggleRule.status}`);
+
+  const anonLlmConfig = await req('PUT', '/api/v1/audit/llm-config', {
+    body: { baseUrl: 'http://evil.example/v1' },
+  });
+  check('匿名修改 LLM 网关被拒 (401)', anonLlmConfig.status === 401, `status=${anonLlmConfig.status}`);
+
+  const userLlmConfig = await req('GET', '/api/v1/audit/llm-config', { token: ctx.devToken });
+  check('普通用户读取 LLM 网关被拒 (403)', userLlmConfig.status === 403, `status=${userLlmConfig.status}`);
+
+  // 管理员可正常操作技能与风控（回归既有权限不被误伤）
+  const adminDel = await req('DELETE', '/api/v1/skills/definitely-not-exists-xyz', { token: ctx.adminToken });
+  check('管理员删除技能正常流转 (404 表示权限通过)', adminDel.status === 404, `status=${adminDel.status}`);
+
+  const adminLlm = await req('GET', '/api/v1/audit/llm-config', { token: ctx.adminToken });
+  check('管理员可读取 LLM 网关', adminLlm.status === 200 && typeof adminLlm.body?.modelName === 'string', `status=${adminLlm.status}`);
+}
+
+/**
+ * 分组十一：建议管理（feedback CRUD 与可见性隔离）+ 菜单级权限
+ * 建议：管理员看全部可删任意；普通用户只看自己的且只能删自己的
+ * 菜单权限：仅超管可调整，白名单校验，超管目标不可改
+ */
+async function testFeedbackAndMenuPermissions() {
+  group('11. 建议管理与菜单级权限');
+
+  // —— 建议提交与可见性隔离 ——
+  const fbCreate = await req('POST', '/api/v1/feedback', {
+    token: ctx.devToken,
+    body: { title: `回归建议-${RUN}`, content: '建议增加深色模式', category: 'feature', rating: 5 },
+  });
+  check('提交建议成功', fbCreate.status === 201 || fbCreate.status === 200, `status=${fbCreate.status}`);
+  check('建议记录包含提交者信息', Boolean(fbCreate.body?.submitterId && fbCreate.body?.submitterName), JSON.stringify(fbCreate.body).slice(0, 150));
+  const fbId = fbCreate.body?.id;
+
+  const anonList = await req('GET', '/api/v1/feedback');
+  check('匿名拉取建议被拒 (401)', anonList.status === 401, `status=${anonList.status}`);
+
+  const devList = await req('GET', '/api/v1/feedback', { token: ctx.devToken });
+  check('普通用户可查看建议', devList.status === 200 && Array.isArray(devList.body), `status=${devList.status}`);
+  const devHasOwn = Array.isArray(devList.body) && devList.body.some(f => f.id === fbId);
+  check('普通用户能看到自己提交的建议', devHasOwn, `id=${fbId}`);
+
+  const adminList = await req('GET', '/api/v1/feedback', { token: ctx.adminToken });
+  check('管理员可查看全部建议', adminList.status === 200 && Array.isArray(adminList.body), `status=${adminList.status}`);
+
+  // 普通用户删除自己的建议
+  const devDelOwn = await req('DELETE', `/api/v1/feedback/${fbId}`, { token: ctx.devToken });
+  check('提交者本人可删除建议', devDelOwn.status === 200 && devDelOwn.body?.success, `status=${devDelOwn.status}`);
+
+  // 再提交一条，测试普通用户不能删他人建议
+  const fb2 = await req('POST', '/api/v1/feedback', {
+    token: ctx.devToken,
+    body: { title: `回归建议2-${RUN}`, content: '另一个建议', category: 'bug', rating: 3 },
+  });
+  const fb2Id = fb2.body?.id;
+  const adminDelOther = await req('DELETE', `/api/v1/feedback/${fb2Id}`, { token: ctx.adminToken });
+  check('管理员可删除他人建议', adminDelOther.status === 200 && adminDelOther.body?.success, `status=${adminDelOther.status}`);
+
+  const fb3 = await req('POST', '/api/v1/feedback', {
+    token: ctx.devToken,
+    body: { title: `回归建议3-${RUN}`, content: '第三个建议', category: 'other', rating: 4 },
+  });
+  // 用一个不同的普通用户测试跨用户删除权限
+  const fb3Id = fb3.body?.id;
+  const otherEmp = await req('POST', '/api/v1/auth/oss-login', {
+    body: { employeeId: `9${String(Date.now()).slice(0, 6)}` },
+  });
+  if (otherEmp.body?.token) {
+    const otherDelete = await req('DELETE', `/api/v1/feedback/${fb3Id}`, { token: otherEmp.body.token });
+    check('他人无权删除我的建议 (403)', otherDelete.status === 403, `status=${otherDelete.status}`);
+  }
+  await req('DELETE', `/api/v1/feedback/${fb3Id}`, { token: ctx.devToken });
+
+  const notFound = await req('DELETE', `/api/v1/feedback/${fb3Id}`, { token: ctx.devToken });
+  check('删除不存在建议返回 404', notFound.status === 404, `status=${notFound.status}`);
+
+  // —— 菜单级权限 ——
+  const invalidPerm = await req('PATCH', `/api/v1/auth/users/${ctx.adminUser?.id}/menu-permissions`, {
+    token: ctx.adminToken,
+    body: { permissions: ['audit', 'evil'] },
+  });
+  check('非法菜单权限被拒绝 (400)', invalidPerm.status === 400, `status=${invalidPerm.status}`);
+
+  const superTarget = await req('PATCH', `/api/v1/auth/users/${ctx.adminUser?.id}/menu-permissions`, {
+    token: ctx.adminToken,
+    body: { permissions: [] },
+  });
+  check('超管自身的菜单权限不可调整 (400)', superTarget.status === 400, `status=${superTarget.status}`);
+
+  const nonSuperPatch = await req('PATCH', `/api/v1/auth/users/${ctx.adminUser?.id}/menu-permissions`, {
+    token: ctx.devToken,
+    body: { permissions: ['audit'] },
+  });
+  check('非超管调整菜单权限被拒 (403)', nonSuperPatch.status === 403, `status=${nonSuperPatch.status}`);
+
+  // 正向流程：把 dev 用户提升为管理员再勾选权限 → 再撤销（先提升以便验证权限字段）
+  const promote = await req('PATCH', `/api/v1/auth/users/${ctx.devUser?.id}/role`, {
+    token: ctx.adminToken,
+    body: { role: 'admin' },
+  });
+  check('委任管理员成功', promote.status === 200, `status=${promote.status}`);
+  check('委任管理员默认获得 audit+rules 权限', JSON.stringify(promote.body?.menuPermissions || []).includes('audit'), `perms=${JSON.stringify(promote.body?.menuPermissions)}`);
+
+  const narrow = await req('PATCH', `/api/v1/auth/users/${ctx.devUser?.id}/menu-permissions`, {
+    token: ctx.adminToken,
+    body: { permissions: ['audit'] },
+  });
+  check('仅保留审核管理权限', JSON.stringify(narrow.body?.menuPermissions || []) === JSON.stringify(['audit']), `perms=${JSON.stringify(narrow.body?.menuPermissions)}`);
+
+  // 撤销管理员并清理
+  await req('PATCH', `/api/v1/auth/users/${ctx.devUser?.id}/role`, {
+    token: ctx.adminToken,
+    body: { role: 'user' },
+  });
+}
+
+/**
+ * 分组十三：技能专家组归属（专家组即标签，可多选）
+ */
+async function testSkillExpertDomains() {
+  group('13. 技能专家组归属');
+
+  // 用回归组内已创建的技能（ctx.skillId 此时已被 cleanup 删除，这里新建一个）
+  const skill = await req('POST', '/api/v1/skills/upload', {
+    token: ctx.adminToken,
+    body: {
+      name: `专家组归属验证-${RUN}`,
+      category: 'coding',
+      description: '验证专家组标签归属接口。',
+      author: 'QA机器人',
+    },
+  });
+  const skillId = skill.body?.id;
+  check('创建验证技能成功', [200, 201].includes(skill.status), `status=${skill.status}`);
+
+  const anon = await req('PUT', `/api/v1/skills/${skillId}/expert-domains`, {
+    body: { domains: ['fullstack'] },
+  });
+  check('匿名修改专家组归属被拒 (401)', anon.status === 401, `status=${anon.status}`);
+
+  const user = await req('PUT', `/api/v1/skills/${skillId}/expert-domains`, {
+    token: ctx.devToken,
+    body: { domains: ['fullstack'] },
+  });
+  check('普通用户修改专家组归属被拒 (403)', user.status === 403, `status=${user.status}`);
+
+  const update = await req('PUT', `/api/v1/skills/${skillId}/expert-domains`, {
+    token: ctx.adminToken,
+    body: { domains: ['fullstack', 'dba', 'fullstack'] },
+  });
+  check('管理员设置专家组归属成功', update.status === 200, `status=${update.status}`);
+  check('专家组归属去重存储', JSON.stringify(update.body?.expertDomains || []) === JSON.stringify(['fullstack', 'dba']), `domains=${JSON.stringify(update.body?.expertDomains)}`);
+
+  const detail = await req('GET', `/api/v1/skills/${skillId}`);
+  check('详情接口返回专家组归属', Array.isArray(detail.body?.expertDomains) && detail.body.expertDomains.includes('fullstack'), `domains=${JSON.stringify(detail.body?.expertDomains)}`);
+
+  const clear = await req('PUT', `/api/v1/skills/${skillId}/expert-domains`, {
+    token: ctx.adminToken,
+    body: { domains: [] },
+  });
+  check('可清空专家组归属', JSON.stringify(clear.body?.expertDomains || []) === JSON.stringify([]), `domains=${JSON.stringify(clear.body?.expertDomains)}`);
+
+  // 清理验证技能
+  await req('DELETE', `/api/v1/skills/${skillId}`, { token: ctx.adminToken });
+}
+
+/**
+ * 分组十二：技能分类标签管理
+ * 列表匿名可读（集市与发布表单依赖）；增删改仅管理员，普通用户 403
+ */
+async function testSkillCategories() {
+  group('12. 技能分类标签管理');
+
+  const list = await req('GET', '/api/v1/skill-categories');
+  check('分类列表匿名可读', list.status === 200 && Array.isArray(list.body), `status=${list.status}`);
+  const seedCount = Array.isArray(list.body) ? list.body.length : 0;
+  check('默认分类已播种', seedCount >= 8, `count=${seedCount}`);
+
+  const anonCreate = await req('POST', '/api/v1/skill-categories', {
+    body: { id: 'test-cat', label: '测试分类' },
+  });
+  check('匿名新增分类被拒 (401)', anonCreate.status === 401, `status=${anonCreate.status}`);
+
+  const userCreate = await req('POST', '/api/v1/skill-categories', {
+    token: ctx.devToken,
+    body: { id: 'test-cat', label: '测试分类' },
+  });
+  check('普通用户新增分类被拒 (403)', userCreate.status === 403, `status=${userCreate.status}`);
+
+  const catId = `qa-cat-${RUN}`;
+  const create = await req('POST', '/api/v1/skill-categories', {
+    token: ctx.adminToken,
+    body: { id: catId, label: '回归测试分类', sortOrder: 999 },
+  });
+  check('管理员新增分类成功', create.status === 201 || create.status === 200, `status=${create.status} ${JSON.stringify(create.body).slice(0, 120)}`);
+  check('新增分类已启用', create.body?.isEnabled === true, `enabled=${create.body?.isEnabled}`);
+
+  const afterList = await req('GET', '/api/v1/skill-categories');
+  const hasNew = Array.isArray(afterList.body) && afterList.body.some(c => c.id === catId);
+  check('新增分类出现在列表中', hasNew, `id=${catId}`);
+
+  const rename = await req('PATCH', `/api/v1/skill-categories/${catId}`, {
+    token: ctx.adminToken,
+    body: { label: '回归测试分类-已改名', isEnabled: false },
+  });
+  check('管理员可改分类名称', rename.status === 200 && rename.body?.label === '回归测试分类-已改名', `status=${rename.status} label=${rename.body?.label}`);
+
+  const disabledList = await req('GET', '/api/v1/skill-categories');
+  const hidden = Array.isArray(disabledList.body) && !disabledList.body.some(c => c.id === catId);
+  check('停用的分类不再出现在默认列表', hidden, `count=${Array.isArray(disabledList.body) ? disabledList.body.length : 0}`);
+
+  const del = await req('DELETE', `/api/v1/skill-categories/${catId}`, { token: ctx.adminToken });
+  check('管理员可删除分类', del.status === 200 && del.body?.success, `status=${del.status}`);
+
+  const delAgain = await req('DELETE', `/api/v1/skill-categories/${catId}`, { token: ctx.adminToken });
+  check('删除不存在分类返回 404', delAgain.status === 404, `status=${delAgain.status}`);
+}
+
+/**
+ * 分组十四：岗位专家组 CRUD
+ * 列表匿名可读（首页矩阵依赖）；增删改仅管理员
+ */
+async function testExpertDomainCrud() {
+  group('14. 岗位专家组 CRUD');
+
+  const list = await req('GET', '/api/v1/expert-domains');
+  check('专家组列表匿名可读', list.status === 200 && Array.isArray(list.body), `status=${list.status}`);
+  const seedCount = Array.isArray(list.body) ? list.body.length : 0;
+  check('默认专家组已播种', seedCount >= 9, `count=${seedCount}`);
+  const hasDesc = Array.isArray(list.body) && list.body.some(d => (d.description || '').length > 10);
+  check('专家组包含详情描述字段', hasDesc, `count=${seedCount}`);
+
+  const anonCreate = await req('POST', '/api/v1/expert-domains', {
+    body: { id: 'qa-domain', name: '测试组', shortLabel: '测试', description: 'desc' },
+  });
+  check('匿名新增专家组被拒 (401)', anonCreate.status === 401, `status=${anonCreate.status}`);
+
+  const userCreate = await req('POST', '/api/v1/expert-domains', {
+    token: ctx.devToken,
+    body: { id: 'qa-domain', name: '测试组', shortLabel: '测试', description: 'desc' },
+  });
+  check('普通用户新增专家组被拒 (403)', userCreate.status === 403, `status=${userCreate.status}`);
+
+  const domainId = `qa_domain_${RUN}`;
+  const create = await req('POST', '/api/v1/expert-domains', {
+    token: ctx.adminToken,
+    body: {
+      id: domainId,
+      name: '回归测试专家组',
+      shortLabel: '回归测试',
+      description: '回归测试自动创建的专家组，验证完整 CRUD 链路。',
+      iconName: 'Layers',
+      sortOrder: 999,
+    },
+  });
+  check('管理员新增专家组成功', create.status === 201 || create.status === 200, `status=${create.status}`);
+
+  const update = await req('PATCH', `/api/v1/expert-domains/${domainId}`, {
+    token: ctx.adminToken,
+    body: { name: '回归测试专家组-已改名', description: '更新后的描述' },
+  });
+  check('管理员可编辑专家组', update.status === 200 && update.body?.name === '回归测试专家组-已改名', `status=${update.status} name=${update.body?.name}`);
+
+  const afterList = await req('GET', '/api/v1/expert-domains');
+  const hasNew = Array.isArray(afterList.body) && afterList.body.some(d => d.id === domainId);
+  check('新增专家组出现在列表中', hasNew, `id=${domainId}`);
+
+  const del = await req('DELETE', `/api/v1/expert-domains/${domainId}`, { token: ctx.adminToken });
+  check('管理员可删除专家组', del.status === 200 && del.body?.success, `status=${del.status}`);
+
+  const delAgain = await req('DELETE', `/api/v1/expert-domains/${domainId}`, { token: ctx.adminToken });
+  check('删除不存在专家组返回 404', delAgain.status === 404, `status=${delAgain.status}`);
+}
+
+/**
+ * 分组十五：ZIP 无损链路（上传 base64 原始包 → 下载还原一致 → Git 市场真实文件）
+ * 修复历史 bug：前端曾只传解压文本文件树，导致二进制损坏、下载文件名固定、Git 发布模板空壳
+ */
+async function testZipRoundTrip() {
+  group('15. ZIP 无损上传/下载/Git 链路');
+
+  // 用 jszip 构造含二进制文件的 ZIP（回归脚本可 require 项目依赖）
+  const JSZip = (await import('jszip')).default;
+  const zip = new JSZip();
+  zip.file('SKILL.md', `# 回归 ZIP 技能-${RUN}\n\nZIP 无损链路验证`);
+  zip.file('assets/icon.png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9, 9]));
+  const zipBuf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  const origB64 = zipBuf.toString('base64');
+
+  const upload = await req('POST', '/api/v1/skills/upload', {
+    token: ctx.adminToken,
+    body: {
+      name: `回归 ZIP 技能-${RUN}`,
+      category: 'design',
+      description: '验证上传原始 ZIP 的无损链路。',
+      author: 'QA机器人',
+      zipBuffer: origB64,
+      zipFileName: 'ui-ux-pro-max-skill-2.11.0.zip',
+    },
+  });
+  check('带原始 ZIP 上传成功', [200, 201].includes(upload.status), `status=${upload.status} ${JSON.stringify(upload.body).slice(0, 150)}`);
+  const skillId = upload.body?.id;
+  ctx.zipSkillId = skillId;
+
+  // 下载接口：文件名、大小、内容与上传一致
+  const raw = await fetch(`${BASE}/api/v1/skills/${skillId}/zip`, {
+    headers: { Authorization: `Bearer ${ctx.adminToken}` },
+  });
+  const dlBuf = Buffer.from(await raw.arrayBuffer());
+  const dlName = decodeURIComponent((raw.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || '');
+  check('原始 ZIP 下载文件名与上传一致', dlName === 'ui-ux-pro-max-skill-2.11.0.zip', `name=${dlName}`);
+  check('原始 ZIP 下载大小与上传一致', dlBuf.length === zipBuf.length, `size=${dlBuf.length} vs ${zipBuf.length}`);
+  check('原始 ZIP 下载内容与上传一致 (含二进制)', dlBuf.toString('base64') === origB64, 'base64 mismatch');
+
+  // 审核通过后 Git 市场写入真实文件（含二进制 png 无损还原）
+  await req('POST', `/api/v1/skills/${skillId}/approve`, {
+    token: ctx.adminToken,
+    body: { reviewer: 'admin' },
+  });
+  const { readdirSync, readFileSync, existsSync } = await import('node:fs');
+  const slug = upload.body?.slug?.replace('@skillhub/', '');
+  const pluginDir = `server/storage/git-marketplace/plugins/${slug}`;
+  const gitFiles = [];
+  const walk = (d) => {
+    if (!existsSync(d)) return;
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = `${d}/${e.name}`;
+      if (e.isDirectory()) walk(p);
+      else gitFiles.push(p);
+    }
+  };
+  walk(pluginDir);
+  const pngPath = gitFiles.find(f => f.endsWith('assets/icon.png'));
+  let pngOk = false;
+  if (pngPath) {
+    const png = readFileSync(pngPath);
+    // PNG 魔数 89 50 4E 47 无损还原
+    pngOk = png[0] === 0x89 && png[1] === 0x50 && png[2] === 0x4e && png[3] === 0x47;
+  }
+  check('Git 市场写入真实二进制文件', pngOk, `files=${gitFiles.length} png=${pngPath}`);
+  check('Git 市场包含 SKILL.md', gitFiles.some(f => f.endsWith('SKILL.md')), `files=${gitFiles.join(',')}`);
+
+  // 清理验证技能（同步移除 Git 市场索引）
+  await req('DELETE', `/api/v1/skills/${skillId}`, { token: ctx.adminToken });
+}
+
+/**
  * 主入口：串行执行全部分组并汇总结果
  */
 async function main() {
@@ -528,7 +1217,15 @@ async function main() {
   await testAudit();
   await testMarketplace();
   await testSpaCoexistence();
+  await testLlmEngine();
   await testCleanup();
+  await testIdRobustness();
+  await testPrivilegeBoundaries();
+  await testFeedbackAndMenuPermissions();
+  await testSkillCategories();
+  await testSkillExpertDomains();
+  await testExpertDomainCrud();
+  await testZipRoundTrip();
 
   console.log(`\n${'─'.repeat(60)}`);
   console.log(`\x1b[32m通过 ${passed}\x1b[0m  \x1b[31m失败 ${failed}\x1b[0m  合计 ${passed + failed}`);

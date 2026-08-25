@@ -60,3 +60,38 @@ remotePort = 17300
 ```
 
 修改后执行 `sudo systemctl restart frpc` 生效。
+
+## LLM 审核引擎配置
+
+双引擎中的「语义研判引擎」支持任意 OpenAI 兼容网关（DeepSeek / 通义 / vLLM / 内网代理）。
+
+两种配置方式，二选一即可：
+
+1. **环境变量播种**（首次启动生效，适合运维预置）——在 `server/.env` 或 systemd 单元里加：
+
+   ```ini
+   Environment="LLM_BASE_URL=https://api.deepseek.com/v1"
+   Environment="LLM_MODEL_NAME=deepseek-chat"
+   Environment="LLM_API_KEY=sk-xxxxxxxx"
+   ```
+
+2. **管理端界面**（推荐日常使用）——登录后进入「风控中心 → 大模型网关」，
+   填写 Base URL / API Key / 模型名，点「测试网关连通性」由服务端发起真实探测，
+   确认通过后勾选「启用真实大模型语义研判」并保存。
+
+要点：
+
+- API Key 仅存服务端数据库，接口只回传掩码，前端不缓存明文。
+- 三项全部留空也能正常跑：语义引擎自动降级为本地启发式规则，审核流程不中断，
+  报告里会标注 `engine: heuristic` 与降级原因。
+- 超时（默认 20s）与重试次数（默认 2 次）可在界面调整；4xx 凭据错误不会重试。
+
+## 回归测试
+
+部署或升级后建议跑一遍：
+
+```bash
+pnpm run test:regression                          # 129 条 API 断言（默认 127.0.0.1:3001）
+pnpm run test:plugin-e2e                          # 21 条真实 claude CLI 插件安装断言
+node scripts/regression-test.mjs https://souxy.com:7300   # 顺带验证公网隧道
+```

@@ -20,11 +20,12 @@ import {
   Settings,
   PlusCircle,
   Flame,
-  Award
+  Award,
+  Tags
 } from 'lucide-react';
 import { UserAccount } from '../types';
 
-export type NavigationTab = 'market' | 'demands' | 'personal' | 'audit' | 'rules' | 'settings' | 'detail';
+export type NavigationTab = 'market' | 'demands' | 'personal' | 'audit' | 'rules' | 'settings' | 'feedback' | 'manage' | 'detail';
 
 interface HeaderProps {
   currentTab: NavigationTab;
@@ -32,7 +33,6 @@ interface HeaderProps {
   onOpenUpload: () => void;
   onOpenCreateDemand: () => void;
   onOpenCommandPalette: () => void;
-  onOpenFeedback: () => void;
   onOpenLogin: () => void;
   currentUser: UserAccount | null;
   allUsers: UserAccount[];
@@ -52,7 +52,6 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenUpload,
   onOpenCreateDemand,
   onOpenCommandPalette,
-  onOpenFeedback,
   onOpenLogin,
   currentUser,
   allUsers,
@@ -69,6 +68,20 @@ export const Header: React.FC<HeaderProps> = ({
 
   const isSuperAdmin = currentUser?.role === 'super_admin';
   const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
+  // 菜单级权限：超管恒全量；管理员按 menuPermissions 控制「审核管理/风控中心」入口
+  const menuPermissions = currentUser?.menuPermissions ?? [];
+  const canAccessAudit =
+    isSuperAdmin || (currentUser?.role === 'admin' && menuPermissions.includes('audit'));
+  const canAccessRules =
+    isSuperAdmin || (currentUser?.role === 'admin' && menuPermissions.includes('rules'));
+
+  // 演示账号切换列表：仅保留超级管理员 + 第一个普通用户
+  // 不渲染全量员工名单，避免把组织人员结构暴露给当前登录者
+  const demoSwitchUsers = React.useMemo(() => {
+    const superAdmin = allUsers.find(u => u.role === 'super_admin');
+    const normalUser = allUsers.find(u => u.role === 'user');
+    return [superAdmin, normalUser].filter((u): u is UserAccount => Boolean(u));
+  }, [allUsers]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -98,9 +111,6 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="flex items-center gap-1.5">
                 <span className="text-lg font-black tracking-tight bg-gradient-to-r from-slate-900 via-indigo-950 to-indigo-700 bg-clip-text text-transparent">
                   SkillHub
-                </span>
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200/60">
-                  企业内网
                 </span>
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${backendOnline === false ? 'bg-amber-400' : backendOnline ? 'bg-emerald-500' : 'bg-slate-300 animate-pulse'}`}
@@ -142,55 +152,39 @@ export const Header: React.FC<HeaderProps> = ({
               <span>征集广场</span>
             </button>
 
-            {/* Admin Tabs */}
-            {isAdmin && (
-              <>
-                <button
-                  onClick={() => onSelectTab('audit')}
-                  id="nav-audit"
-                  className={`relative px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
-                    currentTab === 'audit'
-                      ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70 shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                  }`}
-                >
-                  <ShieldCheck className="w-4 h-4 text-indigo-600" />
-                  <span>审核管理</span>
-                  {pendingReviewsCount > 0 && (
-                    <span className="w-4 h-4 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center animate-pulse">
-                      {pendingReviewsCount}
-                    </span>
-                  )}
-                </button>
-
-                <button
-                  onClick={() => onSelectTab('rules')}
-                  id="nav-rules"
-                  className={`px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
-                    currentTab === 'rules'
-                      ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70 shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                  }`}
-                >
-                  <Sliders className="w-4 h-4 text-indigo-600" />
-                  <span>风控中心</span>
-                </button>
-              </>
-            )}
-
-            {/* Super Admin ONLY Settings */}
-            {isSuperAdmin && (
+            {/* Admin Tabs: 审核管理与风控中心按菜单权限独立控制 */}
+            {canAccessAudit && (
               <button
-                onClick={() => onSelectTab('settings')}
-                id="nav-settings"
-                className={`px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
-                  currentTab === 'settings'
+                onClick={() => onSelectTab('audit')}
+                id="nav-audit"
+                className={`relative px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
+                  currentTab === 'audit'
                     ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70 shadow-2xs'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                 }`}
               >
-                <Settings className="w-4 h-4 text-indigo-600" />
-                <span>权限设置</span>
+                <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                <span>审核管理</span>
+                {pendingReviewsCount > 0 && (
+                  <span className="w-4 h-4 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center animate-pulse">
+                    {pendingReviewsCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {canAccessRules && (
+              <button
+                onClick={() => onSelectTab('rules')}
+                id="nav-rules"
+                className={`px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
+                  currentTab === 'rules'
+                    ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                <Sliders className="w-4 h-4 text-indigo-600" />
+                <span>风控中心</span>
               </button>
             )}
           </nav>
@@ -206,7 +200,7 @@ export const Header: React.FC<HeaderProps> = ({
             id="btn-nav-search"
           >
             <Search className="w-3.5 h-3.5" />
-            <span className="hidden lg:inline">搜索技能或需求...</span>
+            <span className="hidden lg:inline">搜索技能...</span>
             <kbd className="hidden lg:inline-block font-mono text-[10px] bg-white px-1.5 py-0.5 rounded border border-slate-200 text-slate-500">
               ⌘K
             </kbd>
@@ -296,7 +290,7 @@ export const Header: React.FC<HeaderProps> = ({
                               ? '🛡️ 超级管理员' 
                               : currentUser.role === 'admin'
                               ? '⚙️ 系统管理员'
-                              : '💻 普通开发者'}
+                              : '💻 普通用户'}
                           </span>
                         </div>
                       </div>
@@ -325,22 +319,24 @@ export const Header: React.FC<HeaderProps> = ({
                     <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
                   </button>
 
-                  {/* Demands Market Shortcut */}
-                  <button
-                    onClick={() => {
-                      onSelectTab('demands');
-                      setShowUserMenu(false);
-                    }}
-                    className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-amber-50 text-slate-700 hover:text-amber-900 font-semibold transition-colors text-left"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Coins className="w-4 h-4 text-amber-500" />
-                      <span>技能征集广场</span>
-                    </div>
-                    <span className="text-[10px] text-amber-600 font-bold">需求</span>
-                  </button>
+                  {/* Demands Management Shortcut（仅管理员可见） */}
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        onSelectTab('demands');
+                        setShowUserMenu(false);
+                      }}
+                      className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-amber-50 text-slate-700 hover:text-amber-900 font-semibold transition-colors text-left"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Coins className="w-4 h-4 text-amber-500" />
+                        <span>技能征集管理</span>
+                      </div>
+                      <span className="text-[10px] text-amber-600 font-bold">管理</span>
+                    </button>
+                  )}
 
-                  {/* Super Admin Settings Shortcut */}
+                  {/* Super Admin Settings Shortcut（仅存于用户下拉菜单） */}
                   {isSuperAdmin && (
                     <button
                       onClick={() => {
@@ -351,27 +347,47 @@ export const Header: React.FC<HeaderProps> = ({
                     >
                       <div className="flex items-center gap-2.5">
                         <Settings className="w-4 h-4 text-indigo-600" />
-                        <span>权限设置 (管理员委任)</span>
+                        <span>权限设置</span>
                       </div>
                       <Shield className="w-3.5 h-3.5 text-amber-600" />
                     </button>
                   )}
 
-                  {/* Feedback Link */}
-                  <button
-                    onClick={() => {
-                      onOpenFeedback();
-                      setShowUserMenu(false);
-                    }}
-                    id="menu-item-feedback"
-                    className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 text-slate-700 font-semibold transition-colors text-left"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <MessageSquare className="w-4 h-4 text-indigo-600" />
-                      <span>全站建议与体验反馈</span>
-                    </div>
-                    <span className="text-[10px] text-slate-400">意见箱</span>
-                  </button>
+                  {/* 建议管理（仅管理员可见） */}
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        onSelectTab('feedback');
+                        setShowUserMenu(false);
+                      }}
+                      id="menu-item-feedback"
+                      className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 text-slate-700 font-semibold transition-colors text-left"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <MessageSquare className="w-4 h-4 text-indigo-600" />
+                        <span>建议管理</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400">意见箱</span>
+                    </button>
+                  )}
+
+                  {/* 分类和专家组管理（仅管理员可见） */}
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        onSelectTab('manage');
+                        setShowUserMenu(false);
+                      }}
+                      id="menu-item-category-domain"
+                      className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 text-slate-700 font-semibold transition-colors text-left"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Tags className="w-4 h-4 text-indigo-600" />
+                        <span>分类和专家组管理</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400">组织管理</span>
+                    </button>
+                  )}
 
                   {/* Role Switcher Section */}
                   <div className="pt-2 border-t border-slate-100">
@@ -380,7 +396,8 @@ export const Header: React.FC<HeaderProps> = ({
                     </div>
 
                     <div className="space-y-1">
-                      {allUsers.map(user => {
+                      {/* 仅展示超管 + 一个普通用户两个演示身份，避免全量员工名单泄漏 */}
+                      {demoSwitchUsers.map(user => {
                         const isSelected = user.id === currentUser.id;
                         return (
                           <div
@@ -404,7 +421,7 @@ export const Header: React.FC<HeaderProps> = ({
                               <div className="min-w-0">
                                 <div className="truncate text-xs font-semibold">{user.name}</div>
                                 <div className="text-[10px] text-slate-400 truncate">
-                                  {user.role === 'super_admin' ? '🛡️ 超级管理员' : user.role === 'admin' ? '⚙️ 管理员' : '💻 开发者'} · {user.department}
+                                  {user.role === 'super_admin' ? '🛡️ 超级管理员' : '💻 普通用户'} · {user.department}
                                 </div>
                               </div>
                             </div>
@@ -413,6 +430,10 @@ export const Header: React.FC<HeaderProps> = ({
                         );
                       })}
                     </div>
+
+                    <p className="px-2 pt-1.5 text-[10px] text-slate-400 leading-relaxed">
+                      切换仅预览身份界面，写操作仍以登录账号提交；如需真实切换请退出后重新登录。
+                    </p>
                   </div>
 
                   {/* Logout Button */}
@@ -471,28 +492,20 @@ export const Header: React.FC<HeaderProps> = ({
             个人中心
           </button>
         )}
-        {isAdmin && (
-          <>
-            <button
-              onClick={() => onSelectTab('audit')}
-              className={`px-3 py-1 rounded-lg shrink-0 ${currentTab === 'audit' ? 'bg-indigo-600 text-white' : 'text-slate-600'}`}
-            >
-              审核 ({pendingReviewsCount})
-            </button>
-            <button
-              onClick={() => onSelectTab('rules')}
-              className={`px-3 py-1 rounded-lg shrink-0 ${currentTab === 'rules' ? 'bg-indigo-600 text-white' : 'text-slate-600'}`}
-            >
-              风控
-            </button>
-          </>
-        )}
-        {isSuperAdmin && (
+        {canAccessAudit && (
           <button
-            onClick={() => onSelectTab('settings')}
-            className={`px-3 py-1 rounded-lg shrink-0 ${currentTab === 'settings' ? 'bg-indigo-600 text-white' : 'text-slate-600'}`}
+            onClick={() => onSelectTab('audit')}
+            className={`px-3 py-1 rounded-lg shrink-0 ${currentTab === 'audit' ? 'bg-indigo-600 text-white' : 'text-slate-600'}`}
           >
-            设置
+            审核 ({pendingReviewsCount})
+          </button>
+        )}
+        {canAccessRules && (
+          <button
+            onClick={() => onSelectTab('rules')}
+            className={`px-3 py-1 rounded-lg shrink-0 ${currentTab === 'rules' ? 'bg-indigo-600 text-white' : 'text-slate-600'}`}
+          >
+            风控
           </button>
         )}
       </div>

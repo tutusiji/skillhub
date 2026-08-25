@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Plus, 
   Trash2, 
@@ -8,10 +8,8 @@ import {
   Sliders, 
   Play,
   Cpu,
-  Database,
   CheckCircle2,
   AlertCircle,
-  Copy,
   Check,
   RefreshCw,
   Key,
@@ -29,7 +27,6 @@ import {
   ArrowRight,
   Search,
   Filter,
-  CheckCheck,
   RotateCcw,
   SlidersHorizontal,
   Lock,
@@ -37,6 +34,33 @@ import {
 } from 'lucide-react';
 import { AuditRule, DeepSeekConfig, RuleSeverity, RuleType, UserAccount } from '../types';
 import { PopconfirmBubble } from './PopconfirmBubble';
+import { api, type ApiLlmConfig } from '../services/api';
+
+/** 大模型网关厂商快捷预设：一键回填基址与默认模型 */
+const PROVIDER_PRESETS: Array<{
+  id: string;
+  label: string;
+  baseUrl: string;
+  modelName?: string;
+}> = [
+  {
+    id: 'qwen',
+    label: '通义千问 (百炼兼容模式)',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    modelName: 'qwen-plus',
+  },
+  {
+    id: 'deepseek',
+    label: 'DeepSeek 官方',
+    baseUrl: 'https://api.deepseek.com/v1',
+    modelName: 'deepseek-chat',
+  },
+  {
+    id: 'selfhost',
+    label: '内网自建网关',
+    baseUrl: 'http://llm-gateway.corp.local/v1',
+  },
+];
 
 interface RuleManagementViewProps {
   currentUser: UserAccount;
@@ -59,7 +83,7 @@ export const RuleManagementView: React.FC<RuleManagementViewProps> = ({
   onToggleRule,
   onToast
 }) => {
-  const [activeTab, setActiveTab] = useState<'regex' | 'llm' | 'deepseek' | 'sandbox' | 'database'>('regex');
+  const [activeTab, setActiveTab] = useState<'regex' | 'llm' | 'deepseek' | 'sandbox'>('regex');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [editingRule, setEditingRule] = useState<AuditRule | null>(null);
@@ -87,8 +111,13 @@ export const RuleManagementView: React.FC<RuleManagementViewProps> = ({
   const [dsSystemPrompt, setDsSystemPrompt] = useState(deepseekConfig.systemPrompt);
   const [showApiKey, setShowApiKey] = useState(false);
   const [isTestingDs, setIsTestingDs] = useState(false);
+  const [isSavingDs, setIsSavingDs] = useState(false);
+  // 后端 LLM 引擎真实配置（apiKey 只有掩码，用于判断服务端是否已存有凭据）
+  const [serverLlm, setServerLlm] = useState<ApiLlmConfig | null>(null);
+  const [dsTimeoutMs, setDsTimeoutMs] = useState(20000);
+  const [dsMaxRetries, setDsMaxRetries] = useState(2);
+  const [dsEnabled, setDsEnabled] = useState(false);
   const [dsTestResult, setDsTestResult] = useState<{ success: boolean; latency: number; message: string; details?: string } | null>(null);
-  const [copiedSql, setCopiedSql] = useState(false);
 
   // Interactive Full-Sandbox State
   const [sandboxCode, setSandboxCode] = useState(`// 示例 1: 待检测的 AI 技能代码/提示词
@@ -225,56 +254,142 @@ export async function handleUserQuery(input: string) {
     }
   };
 
-  // Test DeepSeek API connectivity
+  /**
+   * 首次进入风控中心时从后端拉取真实的 LLM 引擎配置
+   * 服务端不会回传 API Key 明文，仅返回掩码与 hasApiKey 标记
+   */
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getLlmConfig()
+      .then((cfg) => {
+        if (cancelled) return;
+        setServerLlm(cfg);
+        setDsBaseUrl(cfg.baseUrl);
+        setDsModelName(cfg.modelName);
+        setDsTemperature(cfg.temperature);
+        setDsMaxTokens(cfg.maxTokens);
+        setDsSystemPrompt(cfg.systemPrompt);
+        setDsTimeoutMs(cfg.timeoutMs);
+        setDsMaxRetries(cfg.maxRetries);
+        setDsEnabled(cfg.isEnabled);
+        // 已存有凭据时输入框留空表示"保持不变"，避免把掩码当成新 Key 覆盖回去
+        setDsApiKey('');
+      })
+      .catch(() => {
+        if (!cancelled) setServerLlm(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * 调用后端对 LLM 网关执行真实连通性探测
+   * 若输入框填了新 Key，会先落库再测试，保证测的是即将生效的配置
+   */
   const handleTestDeepSeek = async () => {
-    if (!dsApiKey.trim()) {
-      onToast('warning', '缺少 API Key', '请先填写有效的 DeepSeek API Key 再执行连通性测试');
+    if (!dsApiKey.trim() && !serverLlm?.hasApiKey) {
+      onToast('warning', '缺少 API Key', '请先填写有效的模型网关 API Key 再执行连通性测试');
       return;
     }
 
     setIsTestingDs(true);
     setDsTestResult(null);
 
-    const startTime = Date.now();
     try {
-      await new Promise(r => setTimeout(r, 680));
-      const latency = Date.now() - startTime;
-      setDsTestResult({
-        success: true,
-        latency,
-        message: `网关握手成功！连通目标端点 ${dsBaseUrl}`,
-        details: `模型 ${dsModelName} 响应正常 · SSL 握手正常 · 双引擎语义特征匹配已就绪 (往返时延: ${latency}ms)`
+      // 先把当前表单落库（apiKey 留空则后端保持原凭据不变），再由后端发起真实探测
+      const saved = await api.updateLlmConfig({
+        baseUrl: dsBaseUrl.trim(),
+        apiKey: dsApiKey.trim() || undefined,
+        modelName: dsModelName.trim(),
+        temperature: dsTemperature,
+        maxTokens: dsMaxTokens,
+        systemPrompt: dsSystemPrompt,
+        timeoutMs: dsTimeoutMs,
+        maxRetries: dsMaxRetries,
       });
-      onToast('success', '网关测试通过', `DeepSeek (${dsModelName}) 连通性测试成功，响应时延 ${latency}ms`);
+      setServerLlm(saved);
+
+      const result = await api.testLlmConfig();
+      setDsTestResult({
+        success: result.success,
+        latency: result.latencyMs,
+        message: result.success ? '网关连通成功' : '网关连通失败',
+        details: result.message,
+      });
+      if (result.success) {
+        onToast('success', '网关测试通过', `模型 ${result.model || dsModelName} 响应正常，往返时延 ${result.latencyMs}ms`);
+      } else {
+        onToast('error', '网关连接失败', result.message);
+      }
+      // 回读最新自检状态
+      setServerLlm(await api.getLlmConfig());
     } catch (err: any) {
       setDsTestResult({
         success: false,
         latency: 0,
-        message: `连接失败: ${err.message || '网络连接超时或鉴权失败'}`
+        message: '连通性测试请求失败',
+        details: err?.message || '无法连接 SkillHub 后端，请确认服务已启动',
       });
-      onToast('error', '网关连接失败', '无法连接到指定的 DeepSeek 服务端点');
+      onToast('error', '测试失败', err?.message || '无法连接 SkillHub 后端');
     } finally {
       setIsTestingDs(false);
     }
   };
 
-  const handleSaveDeepSeek = () => {
-    if (!dsApiKey.trim()) {
-      onToast('warning', '请填写 API Key', 'API Key 不能为空');
+  /**
+   * 保存 LLM 网关配置到后端数据库
+   * API Key 留空代表沿用服务端已存凭据；勾选启用但无凭据时后端会自动拒绝开启
+   */
+  const handleSaveDeepSeek = async () => {
+    if (!dsApiKey.trim() && !serverLlm?.hasApiKey) {
+      onToast('warning', '请填写 API Key', '启用真实 LLM 引擎前必须先配置有效的 API Key');
       return;
     }
-    const updated: DeepSeekConfig = {
-      baseUrl: dsBaseUrl.trim() || 'https://api.deepseek.com/v1',
-      apiKey: dsApiKey.trim(),
-      modelName: dsModelName.trim() || 'deepseek-chat',
-      temperature: dsTemperature,
-      maxTokens: dsMaxTokens,
-      systemPrompt: dsSystemPrompt.trim(),
-      lastTestedAt: new Date().toISOString(),
-      testStatus: dsTestResult?.success ? 'success' : 'untested'
-    };
-    onSaveDeepSeekConfig(updated);
-    onToast('success', '大模型网关配置已更新', `已将双引擎审计底层驱动切换至 DeepSeek (${updated.modelName})`);
+
+    setIsSavingDs(true);
+    try {
+      const saved = await api.updateLlmConfig({
+        baseUrl: dsBaseUrl.trim() || 'https://api.deepseek.com/v1',
+        apiKey: dsApiKey.trim() || undefined,
+        modelName: dsModelName.trim() || 'deepseek-chat',
+        temperature: dsTemperature,
+        maxTokens: dsMaxTokens,
+        systemPrompt: dsSystemPrompt.trim(),
+        timeoutMs: dsTimeoutMs,
+        maxRetries: dsMaxRetries,
+        isEnabled: dsEnabled,
+      });
+      setServerLlm(saved);
+      setDsEnabled(saved.isEnabled);
+      setDsApiKey('');
+
+      // 同步前端本地展示配置（模型名用于界面标注驱动引擎）
+      onSaveDeepSeekConfig({
+        ...deepseekConfig,
+        baseUrl: saved.baseUrl,
+        apiKey: saved.apiKeyMask,
+        modelName: saved.modelName,
+        temperature: saved.temperature,
+        maxTokens: saved.maxTokens,
+        systemPrompt: saved.systemPrompt,
+        lastTestedAt: saved.lastTestedAt || undefined,
+        testStatus: (saved.testStatus as DeepSeekConfig['testStatus']) || 'untested',
+      });
+
+      onToast(
+        'success',
+        '大模型网关配置已保存至服务端',
+        saved.isEnabled
+          ? `双引擎语义研判已切换为真实模型 ${saved.modelName}`
+          : '配置已保存，但真实 LLM 调用未启用，当前仍使用本地启发式引擎',
+      );
+    } catch (err: any) {
+      onToast('error', '保存失败', err?.message || '无法连接 SkillHub 后端');
+    } finally {
+      setIsSavingDs(false);
+    }
   };
 
   // Interactive Live Dual-Engine Sandbox Runner
@@ -347,11 +462,12 @@ export async function handleUserQuery(input: string) {
       status,
       regexHits,
       llmVerdict: {
-        summary: status === 'passed' 
+        summary: status === 'passed'
           ? '双引擎综合评估通过，未发现高危代码注入或越权访问风险。'
           : `双引擎发现 ${regexHits.length} 项正则特征命中与 ${reasoning.length} 项语义安全告警。`,
         reasoning,
-        confidence: 0.96
+        // 本地启发式置信度：命中越多置信度越高；真实 LLM 判定时该值由服务端覆盖
+        confidence: Math.min(0.95, 0.6 + regexHits.length * 0.05 + reasoning.length * 0.05)
       },
       durationMs
     });
@@ -364,92 +480,6 @@ export async function handleUserQuery(input: string) {
     );
   };
 
-  const pgSchemaSql = `-- ========================================================
--- SkillHub 企业内网 AI 技能市场 PostgreSQL 生产级 Schema
--- ========================================================
-
--- 1. 用户与企业 RBAC 权限表
-CREATE TABLE users (
-    id VARCHAR(64) PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(150) UNIQUE NOT NULL,
-    avatar_url TEXT,
-    department VARCHAR(100),
-    role VARCHAR(20) NOT NULL DEFAULT 'developer', -- 'admin', 'developer'
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- 2. AI 技能主表 (Skills)
-CREATE TABLE skills (
-    id VARCHAR(64) PRIMARY KEY,
-    name VARCHAR(150) NOT NULL,
-    slug VARCHAR(100) UNIQUE NOT NULL, -- 如 '@skillhub/sql-diagnostician'
-    category VARCHAR(50) NOT NULL,    -- 'coding', 'database', 'devops', 'mcp'
-    description TEXT,
-    author_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
-    latest_version VARCHAR(20) DEFAULT 'v1.0.0',
-    status VARCHAR(20) NOT NULL DEFAULT 'pending', -- 'approved', 'pending', 'rejected', 'offline'
-    clients TEXT[] NOT NULL DEFAULT '{}', -- ['claude', 'cursor', 'mcp']
-    tags TEXT[] NOT NULL DEFAULT '{}',
-    likes_count INT NOT NULL DEFAULT 0,
-    stars_count INT NOT NULL DEFAULT 0,
-    downloads_count INT NOT NULL DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- 3. 技能多版本与 ZIP 源码包文件清单表
-CREATE TABLE skill_versions (
-    id VARCHAR(64) PRIMARY KEY,
-    skill_id VARCHAR(64) NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
-    version VARCHAR(30) NOT NULL,
-    readme TEXT,
-    permissions JSONB NOT NULL DEFAULT '[]',
-    file_tree JSONB NOT NULL DEFAULT '[]',   -- ZIP 虚拟目录结构快照
-    zip_storage_url TEXT NOT NULL,          -- 对象存储 (S3/MinIO) 存储路径
-    zip_sha256 VARCHAR(64) NOT NULL,        -- 包体完整性校验哈希
-    install_commands JSONB NOT NULL,        -- 多端安装命令集合
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(skill_id, version)
-);
-
--- 4. 双引擎审核规则库 (Regex & DeepSeek LLM)
-CREATE TABLE audit_rules (
-    id VARCHAR(64) PRIMARY KEY,
-    name VARCHAR(150) NOT NULL,
-    type VARCHAR(20) NOT NULL,       -- 'regex' | 'llm'
-    severity VARCHAR(20) NOT NULL,   -- 'critical', 'high', 'medium', 'low'
-    category VARCHAR(50) NOT NULL,
-    description TEXT,
-    pattern TEXT,
-    llm_prompt_template TEXT,
-    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    is_preset BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- 5. 审核报告与体检日志
-CREATE TABLE audit_reports (
-    id VARCHAR(64) PRIMARY KEY,
-    skill_id VARCHAR(64) NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
-    version_id VARCHAR(64) REFERENCES skill_versions(id) ON DELETE CASCADE,
-    overall_status VARCHAR(20) NOT NULL, -- 'passed', 'warning', 'failed'
-    score INT NOT NULL DEFAULT 100,
-    scanned_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    reviewed_by VARCHAR(64) REFERENCES users(id),
-    admin_feedback TEXT,
-    regex_results JSONB NOT NULL DEFAULT '[]',
-    llm_results JSONB NOT NULL DEFAULT '[]'
-);
-
--- 6. 全局系统配置表 (持久化存储 DeepSeek BaseURL & API Key)
-CREATE TABLE system_settings (
-    key VARCHAR(64) PRIMARY KEY,
-    value JSONB NOT NULL,
-    description TEXT,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);`;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200 pb-16">
@@ -471,7 +501,7 @@ CREATE TABLE system_settings (
               </span>
             </div>
             <p className="text-xs sm:text-sm text-slate-600 max-w-3xl leading-relaxed">
-              统一配置「正则特征硬拦截引擎」与「DeepSeek 语义安全大模型网关」，提供规则增删改查、全流程在线实测沙箱、模型调度参数调优以及 PostgreSQL 生产架构模型。
+              统一配置「正则特征硬拦截引擎」与「大模型语义安全网关」，提供规则增删改查、全流程在线实测沙箱与模型调度参数调优。
             </p>
           </div>
 
@@ -499,14 +529,18 @@ CREATE TABLE system_settings (
 
             <div className="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-100 min-w-[140px]">
               <div className="flex items-center justify-between text-emerald-700 text-[11px] font-semibold">
-                <span>DeepSeek 网关</span>
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                <span>大模型网关</span>
+                <span className={`w-2 h-2 rounded-full ${deepseekConfig.testStatus === 'success' ? 'bg-emerald-500' : deepseekConfig.testStatus === 'failed' ? 'bg-rose-500' : 'bg-slate-400'}`} />
               </div>
               <div className="text-sm font-black text-emerald-950 mt-1 truncate" title={deepseekConfig.modelName}>
-                {deepseekConfig.modelName}
+                {deepseekConfig.modelName || '未配置'}
               </div>
               <div className="text-[10px] text-emerald-700 font-mono">
-                {deepseekConfig.testStatus === 'success' ? '⚡ 握手正常 (38ms)' : '已配置就绪'}
+                {deepseekConfig.testStatus === 'success'
+                  ? '✅ 连通性自检通过'
+                  : deepseekConfig.testStatus === 'failed'
+                    ? '⚠️ 上次自检失败'
+                    : '尚未自检'}
               </div>
             </div>
 
@@ -546,7 +580,7 @@ CREATE TABLE system_settings (
               }`}
             >
               <Bot className="w-4 h-4" />
-              <span>DeepSeek 语义规则库 ({llmRulesCount})</span>
+              <span>LLM 语义规则库 ({llmRulesCount})</span>
             </button>
 
             <button
@@ -558,7 +592,7 @@ CREATE TABLE system_settings (
               }`}
             >
               <Cpu className="w-4 h-4" />
-              <span>DeepSeek 网关与模型调度</span>
+              <span>大模型网关与模型调度</span>
               <span className="px-1.5 py-0.5 rounded-full bg-white/20 text-[10px] font-mono">
                 核心驱动
               </span>
@@ -574,18 +608,6 @@ CREATE TABLE system_settings (
             >
               <Zap className="w-4 h-4 text-amber-500" />
               <span>双引擎全流程测试沙箱</span>
-            </button>
-
-            <button
-              onClick={() => { setActiveTab('database'); setIsCreating(false); setEditingRule(null); }}
-              className={`py-2 px-3.5 rounded-xl font-bold flex items-center gap-2 transition-all shrink-0 ${
-                activeTab === 'database'
-                  ? 'bg-indigo-600 text-white shadow-2xs'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              <Database className="w-4 h-4 text-emerald-500" />
-              <span>PostgreSQL 生产架构</span>
             </button>
           </div>
 
@@ -617,7 +639,7 @@ CREATE TABLE system_settings (
                   </span>
                   <div>
                     <h3 className="text-base font-bold text-slate-900">
-                      {isCreating ? `新建 ${formType === 'regex' ? '正则特征模式' : 'DeepSeek 语义安全'} 规则` : `编辑规则: ${editingRule?.name}`}
+                      {isCreating ? `新建 ${formType === 'regex' ? '正则特征模式' : 'LLM 语义安全'} 规则` : `编辑规则: ${editingRule?.name}`}
                     </h3>
                     <p className="text-xs text-slate-500">
                       配置拦截模式、严重级别、风控分类与在线单项验证测试
@@ -716,7 +738,7 @@ CREATE TABLE system_settings (
                   ) : (
                     <div>
                       <label className="block text-xs font-bold text-slate-800 mb-1">
-                        DeepSeek 语义引导 Prompt 模板 <span className="text-rose-500">*</span>
+                        LLM 语义引导 Prompt 模板 <span className="text-rose-500">*</span>
                       </label>
                       <textarea
                         rows={4}
@@ -953,7 +975,7 @@ CREATE TABLE system_settings (
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900">
-                  DeepSeek 企业大模型网关与调度参数
+                  企业大模型网关与调度参数
                 </h3>
                 <p className="text-xs text-slate-500">
                   驱动 LLM 语义安全引擎对 AI 技能的源码、提示词及运行权限进行全自动深度审查
@@ -965,7 +987,7 @@ CREATE TABLE system_settings (
               <div>
                 <label className="block font-bold text-slate-800 mb-1 flex items-center justify-between">
                   <span>API Base URL (端点接入地址)</span>
-                  <span className="text-slate-400 font-normal">支持公有云或私有 VPC 代理</span>
+                  <span className="text-slate-400 font-normal">OpenAI 兼容协议，支持内部网关</span>
                 </label>
                 <div className="relative">
                   <Globe className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
@@ -973,15 +995,37 @@ CREATE TABLE system_settings (
                     type="text"
                     value={dsBaseUrl}
                     onChange={e => setDsBaseUrl(e.target.value)}
-                    placeholder="https://api.deepseek.com/v1"
+                    placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 font-mono bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
                   />
+                </div>
+                {/* 厂商快捷回填：选择后自动填入对应基址，避免手抄错误 */}
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  <span className="text-[11px] text-slate-400">快捷回填：</span>
+                  {PROVIDER_PRESETS.map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setDsBaseUrl(p.baseUrl);
+                        if (p.modelName) setDsModelName(p.modelName);
+                        onToast('info', '已回填网关地址', `${p.label} 基址已填入，密钥请自行配置`);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-colors ${
+                        dsBaseUrl === p.baseUrl
+                          ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                          : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
               <div>
                 <label className="block font-bold text-slate-800 mb-1 flex items-center justify-between">
-                  <span>DeepSeek API Key (鉴权密钥)</span>
+                  <span>模型网关 API Key (鉴权密钥)</span>
                   <button
                     type="button"
                     onClick={() => setShowApiKey(!showApiKey)}
@@ -996,10 +1040,71 @@ CREATE TABLE system_settings (
                     type={showApiKey ? 'text' : 'password'}
                     value={dsApiKey}
                     onChange={e => setDsApiKey(e.target.value)}
-                    placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+                    placeholder={serverLlm?.hasApiKey ? `已配置 ${serverLlm.apiKeyMask}（留空表示不修改）` : 'sk-xxxxxxxxxxxxxxxxxxxxxxxx'}
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 font-mono bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
                   />
                 </div>
+                <p className="mt-1.5 text-[11px] text-slate-500">
+                  密钥仅存储于服务端数据库，前端不会获取明文。
+                  {serverLlm?.hasApiKey ? ' 如需清空凭据请联系管理员通过接口置空。' : ''}
+                </p>
+              </div>
+
+              {/* 真实调用开关与超时/重试策略：直接影响后端审核链路 */}
+              <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/70 space-y-3">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={dsEnabled}
+                    onChange={e => setDsEnabled(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 accent-indigo-600"
+                  />
+                  <span>
+                    <span className="block font-bold text-slate-800">启用真实大模型语义研判</span>
+                    <span className="block text-[11px] text-slate-500 mt-0.5">
+                      关闭时双引擎的语义引擎会降级为本地启发式规则，审核流程不会中断。
+                    </span>
+                  </span>
+                </label>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-800 mb-1">单次调用超时 (ms)</label>
+                    <input
+                      type="number"
+                      min={1000}
+                      max={120000}
+                      step={1000}
+                      value={dsTimeoutMs}
+                      onChange={e => setDsTimeoutMs(Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-800 mb-1">失败重试次数</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={5}
+                      value={dsMaxRetries}
+                      onChange={e => setDsMaxRetries(Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                  </div>
+                </div>
+
+                {serverLlm && (
+                  <p className="text-[11px] font-semibold">
+                    <span className={serverLlm.isEnabled ? 'text-emerald-700' : 'text-amber-700'}>
+                      当前服务端状态：{serverLlm.isEnabled ? `真实 LLM 引擎已启用 (${serverLlm.modelName})` : '未启用，使用本地启发式引擎'}
+                    </span>
+                    {serverLlm.lastTestedAt && (
+                      <span className="block text-slate-500 font-normal mt-0.5">
+                        最近自检 {new Date(serverLlm.lastTestedAt).toLocaleString('zh-CN')} · {serverLlm.testStatus === 'success' ? '通过' : '失败'}
+                      </span>
+                    )}
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1012,11 +1117,23 @@ CREATE TABLE system_settings (
                     onChange={e => setDsModelName(e.target.value)}
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 font-mono outline-none"
                   >
-                    <option value="deepseek-chat">deepseek-chat (DeepSeek-V3 推荐)</option>
-                    <option value="deepseek-reasoner">deepseek-reasoner (DeepSeek-R1 推理增强)</option>
-                    <option value="deepseek-coder">deepseek-coder (代码分析专精)</option>
-                    <option value="custom-gateway">自定义内网网关模型</option>
+                    <optgroup label="通义千问 (qwen 系列)">
+                      <option value="qwen-plus">qwen-plus (千问通用旗舰)</option>
+                      <option value="qwen-max">qwen-max (千问最强推理)</option>
+                      <option value="qwen-turbo">qwen-turbo (千问高速轻量)</option>
+                      <option value="qwen2.5-72b-instruct">qwen2.5-72b-instruct (开源自部署)</option>
+                    </optgroup>
+                    <optgroup label="DeepSeek 系列">
+                      <option value="deepseek-chat">deepseek-chat (DeepSeek-V3 推荐)</option>
+                      <option value="deepseek-reasoner">deepseek-reasoner (DeepSeek-R1 推理增强)</option>
+                    </optgroup>
+                    <optgroup label="其他">
+                      <option value="custom-gateway">自定义内网网关模型</option>
+                    </optgroup>
                   </select>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    网关基址需与模型所属厂商匹配：千问走百炼兼容模式，DeepSeek 走官方或内网网关。
+                  </p>
                 </div>
 
                 <div>
@@ -1062,9 +1179,10 @@ CREATE TABLE system_settings (
                 <button
                   type="button"
                   onClick={handleSaveDeepSeek}
-                  className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-md active:scale-95 transition-all"
+                  disabled={isSavingDs}
+                  className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-md active:scale-95 transition-all disabled:opacity-50"
                 >
-                  保存网关配置
+                  {isSavingDs ? '保存中...' : '保存网关配置'}
                 </button>
               </div>
             </div>
@@ -1101,7 +1219,7 @@ CREATE TABLE system_settings (
                     <div className="flex items-center gap-2 pt-2 border-t border-emerald-200/60 text-[11px] font-semibold text-emerald-800">
                       <span>往返时延 (RTT): {dsTestResult.latency} ms</span>
                       <span>·</span>
-                      <span>Token 吞吐预估: 85 tokens/s</span>
+                      <span>由服务端真实发起探测请求</span>
                     </div>
                   )}
                 </div>
@@ -1143,7 +1261,7 @@ CREATE TABLE system_settings (
                 </h3>
               </div>
               <p className="text-xs text-slate-500">
-                实时模拟插件审核流程，同时触发正则引擎特征匹配与 DeepSeek 语义风控研判
+                实时模拟插件审核流程，同时触发正则引擎特征匹配与大模型语义风控研判
               </p>
             </div>
 
@@ -1326,46 +1444,6 @@ export function formatSql(query: string): string {
                 </div>
               )}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* TAB 5: POSTGRESQL ENTERPRISE DATABASE SCHEMA */}
-      {/* ========================================================================= */}
-      {activeTab === 'database' && (
-        <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-sm space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <Database className="w-5 h-5 text-emerald-600" />
-                <h3 className="text-base font-bold text-slate-900">
-                  PostgreSQL 生产级数据库 DDL 与架构模型
-                </h3>
-              </div>
-              <p className="text-xs text-slate-500">
-                包含用户 RBAC、技能元数据、多版本快照、双引擎规则库及体检日志的完整 DDL 迁移脚本
-              </p>
-            </div>
-
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(pgSchemaSql);
-                setCopiedSql(true);
-                setTimeout(() => setCopiedSql(false), 2000);
-                onToast('success', '已复制 DDL 脚本', 'PostgreSQL 生产建表 SQL 已复制至剪贴板');
-              }}
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-2 shadow-xs active:scale-95 transition-all self-start sm:self-auto"
-            >
-              {copiedSql ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4" />}
-              <span>{copiedSql ? '已复制 SQL' : '一键复制完整 DDL'}</span>
-            </button>
-          </div>
-
-          <div className="relative">
-            <pre className="p-5 rounded-2xl bg-slate-950 text-emerald-400 font-mono text-xs overflow-x-auto leading-relaxed border border-slate-800 shadow-inner max-h-[600px]">
-              <code>{pgSchemaSql}</code>
-            </pre>
           </div>
         </div>
       )}
