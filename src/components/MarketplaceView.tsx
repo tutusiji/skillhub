@@ -41,6 +41,8 @@ import { useExpertDomains } from '../hooks/useExpertDomains';
 
 interface MarketplaceViewProps {
   skills: SkillItem[];
+  /** 技能列表是否仍在首次加载（用于区分「加载中」与「确实没有技能」） */
+  isLoading?: boolean;
   currentUser?: UserAccount | null;
   onSelectSkill: (skill: SkillItem) => void;
   onOpenUpload: () => void;
@@ -94,6 +96,7 @@ const DomainIcon: React.FC<{ iconName: string; className?: string }> = ({ iconNa
 
 export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
   skills,
+  isLoading = false,
   currentUser,
   onSelectSkill,
   onOpenUpload,
@@ -255,7 +258,9 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-200/80 text-xs">
             <div className="p-3.5 rounded-2xl bg-white/95 border border-slate-200/80 shadow-2xs">
               <span className="text-slate-400 block text-[11px] font-medium">已认证上架</span>
-              <span className="text-xl font-black text-slate-900 mt-0.5 block">{approvedSkills.length} 款插件</span>
+              <span className="text-xl font-black text-slate-900 mt-0.5 block">
+                {isLoading && skills.length === 0 ? '加载中…' : `${approvedSkills.length} 款插件`}
+              </span>
             </div>
             <div className="p-3.5 rounded-2xl bg-white/95 border border-slate-200/80 shadow-2xs">
               <span className="text-slate-400 block text-[11px] font-medium">业务专家组</span>
@@ -550,8 +555,32 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
           </div>
         </div>
 
-        {/* Empty State */}
-        {filteredSkills.length === 0 ? (
+        {/* Loading State：首次加载完成前显示骨架屏，
+            避免空列表被误读成「集市里没有技能」 */}
+        {isLoading && skills.length === 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[0, 1, 2, 3, 4, 5].map(i => (
+              <div
+                key={i}
+                className="rounded-3xl border border-slate-200/90 bg-white p-5 shadow-sm animate-pulse space-y-3"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="h-4 w-16 rounded-md bg-slate-100" />
+                  <div className="h-4 w-20 rounded-md bg-slate-100" />
+                </div>
+                <div className="h-5 w-3/4 rounded-md bg-slate-100" />
+                <div className="h-3 w-1/2 rounded-md bg-slate-100" />
+                <div className="h-3 w-full rounded-md bg-slate-100" />
+                <div className="h-3 w-5/6 rounded-md bg-slate-100" />
+                <div className="pt-4 mt-4 border-t border-slate-100 flex justify-between">
+                  <div className="h-3 w-20 rounded-md bg-slate-100" />
+                  <div className="h-6 w-24 rounded-xl bg-slate-100" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : /* Empty State */
+        filteredSkills.length === 0 ? (
           <div className="p-16 text-center rounded-3xl bg-white border border-slate-200 space-y-3">
             <Layers className="w-10 h-10 text-slate-300 mx-auto" />
             <div className="text-sm font-bold text-slate-700">

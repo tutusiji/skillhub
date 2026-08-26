@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  INITIAL_AUDIT_RULES, 
+import {
+  INITIAL_AUDIT_RULES,
   INITIAL_DEEPSEEK_CONFIG,
-  INITIAL_FEEDBACK, 
-  INITIAL_SKILLS, 
+  INITIAL_FEEDBACK,
   INITIAL_USERS,
-  INITIAL_SKILL_DEMANDS 
 } from './mock/initialData';
 import { 
   AuditExecutionSummary, 
@@ -75,11 +73,16 @@ export default function App() {
   // 组织用户名单（登录后由 /auth/users 覆盖）
   const [allUsers, setAllUsers] = useState<UserAccount[]>(INITIAL_USERS);
 
-  // 技能列表（启动后由 /skills 覆盖）
-  const [skills, setSkills] = useState<SkillItem[]>(INITIAL_SKILLS);
+  // 技能列表：以数据库为唯一数据源，初值必须为空数组。
+  // 若用 INITIAL_SKILLS 打底，首屏会先渲染一批库里并不存在的演示技能，
+  // 待 /skills 返回后被整体替换 —— 用户看到的就是「技能闪现一下又消失」。
+  const [skills, setSkills] = useState<SkillItem[]>([]);
 
-  // 征集需求（启动后由 /demands 覆盖）
-  const [demands, setDemands] = useState<SkillDemand[]>(INITIAL_SKILL_DEMANDS);
+  // 技能列表是否已完成首次后端拉取（用于区分「加载中」与「真的没有技能」）
+  const [skillsLoaded, setSkillsLoaded] = useState(false);
+
+  // 征集需求（启动后由 /demands 覆盖，同样不用 mock 打底）
+  const [demands, setDemands] = useState<SkillDemand[]>([]);
 
   const [rules, setRules] = useState<AuditRule[]>(INITIAL_AUDIT_RULES);
 
@@ -118,26 +121,11 @@ export default function App() {
 
   const [previousTab, setPreviousTab] = useState<NavigationTab>('market');
 
-  // Currently inspected skill for full detail page
-  const [selectedSkill, setSelectedSkill] = useState<SkillItem | null>(() => {
-    try {
-      const hash = window.location.hash.replace('#', '');
-      let targetId: string | null = null;
-      if (hash.startsWith('skill=')) {
-        targetId = hash.split('skill=')[1];
-      } else {
-        const m = window.location.pathname.match(/^\/skill\/([^/]+)/);
-        if (m) targetId = decodeURIComponent(m[1]);
-        else targetId = sessionStorage.getItem('skillhub_selected_skill_id');
-      }
-      if (targetId) {
-        // 技能数据以数据库为准，这里仅从编译期 mock 常量中做离线直达匹配
-        const found = INITIAL_SKILLS.find((s: SkillItem) => s.id === targetId || s.slug === targetId);
-        if (found) return found;
-      }
-    } catch (e) {}
-    return null;
-  });
+  // 当前查看的技能详情。
+  // 初值恒为 null：技能一律以数据库为准，直达 /skill/:slug 时由下方 effect
+  // 调 /skills/:slug 拉取真实详情（期间显示加载态），不再用 mock 常量顶替，
+  // 否则会出现「详情页先显示一个库里不存在的技能、随后被替换」的错乱。
+  const [selectedSkill, setSelectedSkill] = useState<SkillItem | null>(null);
 
   // Selected demand for detail modal
   const [selectedDemand, setSelectedDemand] = useState<SkillDemand | null>(null);
@@ -180,15 +168,14 @@ export default function App() {
     } catch (e) {}
   }, []);
 
-  // Sync tab to sessionStorage (refresh recovery; pathname is the primary source)
+  // 记忆当前 tab（刷新兜底；URL path 始终是主来源）。
+  // 详情页不再记忆技能 id：/skill/:slug 已经能唯一还原，
+  // 且技能必须从后端回源，本地记忆只会带来过期数据。
   useEffect(() => {
     try {
       sessionStorage.setItem('skillhub_active_tab', currentTab);
-      if (currentTab === 'detail' && selectedSkill) {
-        sessionStorage.setItem('skillhub_selected_skill_id', selectedSkill.id);
-      }
     } catch (e) {}
-  }, [currentTab, selectedSkill]);
+  }, [currentTab]);
 
   // 刷新直达详情页：/skill/:slug 对应的技能不在本地时，从后端拉取，避免白屏
   useEffect(() => {
@@ -289,52 +276,78 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
-  // Bootstrap read-only enterprise data from the NestJS backend. The local mock data
-  // remains an explicit offline fallback so the demo still works without server setup.
-  // 组织用户名单 (allUsers) 不在匿名拉取之列：该接口现在要求登录态，由下方登录后的 effect 拉取
-  useEffect(() => {
-    let cancelled = false;
+  /**
+   * 从后端拉取集市主数据（技能 / 规则 / 征集需求）
+   *
+   * 技能列表以数据库为唯一权威：审核通过、下架、删除等变更都只有重新拉取才能看到，
+   * 因此这里既用于首屏启动，也用于「进入技能集市」时的重新校准。
+   * 本地交互态（收藏/点赞标记）在合并时保留，避免刷新数据把用户的星标视觉重置。
+   * @returns 是否成功拉到技能列表
+   */
+  const fetchMarketData = React.useCallback(async (): Promise<boolean> => {
+    const [skillsResult, rulesResult, demandsResult] = await Promise.allSettled([
+      api.listSkills(),
+      api.listAuditRules(),
+      api.listDemands(),
+    ]);
 
-    (async () => {
-      const [skillsResult, rulesResult, demandsResult] = await Promise.allSettled([
-        api.listSkills(),
-        api.listAuditRules(),
-        api.listDemands(),
-      ]);
+    if (skillsResult.status === 'fulfilled') {
+      const fresh = skillsResult.value.map(mapApiSkill);
+      setSkills(prev => {
+        // 保留本地收藏/点赞标记（后端未持久化「谁点过」，只存计数）
+        const localFlags = new Map(prev.map(s => [s.id, { isStarred: s.isStarred, isLiked: s.isLiked }]));
+        return fresh.map(s => {
+          const flags = localFlags.get(s.id);
+          return flags ? { ...s, isStarred: flags.isStarred, isLiked: flags.isLiked } : s;
+        });
+      });
+      setBackendOnline(true);
+      setSkillsLoaded(true);
+    }
+    if (rulesResult.status === 'fulfilled') {
+      setRules(rulesResult.value.map(mapAuditRule));
+    }
+    if (demandsResult.status === 'fulfilled') {
+      setDemands(demandsResult.value.map(mapApiDemand));
+    }
 
-      if (cancelled) return;
+    if (
+      skillsResult.status === 'rejected' &&
+      rulesResult.status === 'rejected' &&
+      demandsResult.status === 'rejected'
+    ) {
+      setBackendOnline(false);
+      // 标记为已加载：否则后端不可用时集市会永远停在骨架加载态
+      setSkillsLoaded(true);
+      console.warn('SkillHub backend unavailable.', skillsResult.reason);
+    }
 
-      if (skillsResult.status === 'fulfilled') {
-        setSkills(skillsResult.value.map(mapApiSkill));
-        setBackendOnline(true);
-      }
-      if (rulesResult.status === 'fulfilled') {
-        setRules(rulesResult.value.map(mapAuditRule));
-      }
-      if (demandsResult.status === 'fulfilled') {
-        setDemands(demandsResult.value.map(mapApiDemand));
-      }
-
-      if (
-        skillsResult.status === 'rejected' &&
-        rulesResult.status === 'rejected' &&
-        demandsResult.status === 'rejected'
-      ) {
-        setBackendOnline(false);
-        console.warn('SkillHub backend unavailable; using offline demo data.', skillsResult.reason);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    return skillsResult.status === 'fulfilled';
   }, []);
 
-  // Revalidate a persisted JWT on startup and refresh the profile from the backend.
+  /** 首屏是否已发起过主数据拉取（避免「启动」与「进入集市」重复请求同一份数据） */
+  const bootstrappedRef = React.useRef(false);
+
+  // 首屏启动 + 每次进入数据驱动页面时拉取主数据。
+  // 关键点：管理员审核通过一个技能后回到集市，必须重新请求才能看到它，
+  // 否则页面用的还是进入时的旧快照（这正是「审核通过后首页看不到新技能」的原因）。
+  // 组织用户名单 (allUsers) 要求登录态，不在此处拉取，由下方登录后的 effect 负责。
+  useEffect(() => {
+    const isDataTab =
+      currentTab === 'market' || currentTab === 'personal' || currentTab === 'audit';
+    if (!bootstrappedRef.current || isDataTab) {
+      bootstrappedRef.current = true;
+      void fetchMarketData();
+    }
+  }, [currentTab, fetchMarketData]);
+
+  // 启动时用持久化的 JWT 恢复登录态。
+  // 注意不能加 `if (!currentUser) return`：刷新后 currentUser 恒为 null，
+  // 那样写会让令牌永远不被校验，用户每次刷新都被打回访客态
+  // （表现为「刷新后我提交/收藏的东西都不见了」）。
   useEffect(() => {
     const token = localStorage.getItem('skillhub_token');
-    if (!token || !currentUser) return;
+    if (!token) return;
 
     let cancelled = false;
     (async () => {
@@ -345,12 +358,15 @@ export default function App() {
             ...mapApiUser(profile),
             avatar: profile.avatar || prev?.avatar || '',
             joinedAt: prev?.joinedAt || new Date().toISOString().split('T')[0],
-            points: profile.points || prev?.points || 10000,
+            points: profile.points ?? prev?.points ?? 10000,
             title: prev?.title,
           }));
         }
       } catch {
-        // Keep the cached demo identity if the server is temporarily unavailable.
+        // 令牌失效（过期/被撤销）：清理掉，回到访客态，避免后续请求持续 401
+        localStorage.removeItem('skillhub_token');
+        localStorage.removeItem('skillhub_user');
+        return;
       }
 
       // 登录态下同步拉取组织用户名单（账号切换器与权限设置页依赖）
@@ -1245,6 +1261,7 @@ export default function App() {
         {currentTab === 'market' && (
           <MarketplaceView
             skills={skills}
+            isLoading={!skillsLoaded}
             onSelectSkill={handleOpenSkillDetail}
             onOpenUpload={() => {
               if (requireAuth('发布新技能')) {

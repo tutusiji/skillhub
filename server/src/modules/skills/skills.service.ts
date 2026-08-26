@@ -23,6 +23,44 @@ export interface FileTreeNode {
 }
 
 /**
+ * 技能列表/详情对外暴露的列白名单（显式排除 zipBlob）
+ *
+ * zipBlob 存的是上传 ZIP 包的 base64，体积可达数 MB/条，只在两处需要：
+ * 原始包下载 (getOriginalZip) 与 Git 市场发布 (zipBufferOf)，
+ * 它们都按 id 单独查询，因此列表与详情一律不返回该列。
+ */
+const LIST_SKILL_COLUMNS = [
+  'id',
+  'name',
+  'slug',
+  'category',
+  'description',
+  'author',
+  'department',
+  'avatar',
+  'version',
+  'status',
+  'clients',
+  'tags',
+  'downloads',
+  'likes',
+  'stars',
+  'permissions',
+  'installCommands',
+  'fileTree',
+  'readme',
+  'expertDomain',
+  'expertDomains',
+  'zipFileName',
+  'auditScore',
+  'reviewedBy',
+  'reviewedAt',
+  'adminFeedback',
+  'createdAt',
+  'updatedAt',
+] as (keyof SkillEntity)[];
+
+/**
  * 技能全生命周期管理服务 (基于 TypeORM 数据库持久化)
  * 负责技能 CRUD、ZIP 源码包文件树提取、多端命令生成与 Git 市场自动化发布
  */
@@ -45,7 +83,16 @@ export class SkillsService implements OnModuleInit {
     // storage/git-marketplace 是可重建的运行时数据，一旦被清理或损坏，
     // 已上架技能会从 marketplace.json 消失导致客户端装不到，此处启动即自愈
     if (count > 0) {
-      await this.reconcileGitMarketOnBoot();
+      // 自愈失败不应阻断启动：Git 市场是可重建的运行时数据，
+      // 而 API 与前端必须先能起来（否则整站不可用）
+      try {
+        await this.reconcileGitMarketOnBoot();
+      } catch (error) {
+        console.warn(
+          '⚠️  Git 市场索引自愈失败，服务继续启动（可稍后重新审核任一技能触发重建）:',
+          (error as Error).message,
+        );
+      }
       return;
     }
 
@@ -159,6 +206,11 @@ export class SkillsService implements OnModuleInit {
     let skills = await this.skillRepository.find({
       where,
       order: { createdAt: 'DESC' },
+      // 列表接口必须排除 zipBlob：它是整个 ZIP 包的 base64（单个技能可达数 MB），
+      // 一旦随列表下发，响应体会随技能数线性膨胀到几十 MB，
+      // 前端首屏要等它传完才能渲染真实数据（表现为「先闪一下旧数据再消失」）。
+      // 原始包由 /skills/:id/zip 单独下载，列表与详情都不需要它。
+      select: LIST_SKILL_COLUMNS,
     });
 
     if (query.search) {
@@ -182,6 +234,8 @@ export class SkillsService implements OnModuleInit {
     const clean = slugOrId.startsWith('@') ? slugOrId : `@skillhub/${slugOrId}`;
     const skill = await this.skillRepository.findOne({
       where: [{ slug: slugOrId }, { slug: clean }, { id: slugOrId }],
+      // 详情页只需要文件树与元数据；原始 ZIP 走 /skills/:id/zip 下载
+      select: LIST_SKILL_COLUMNS,
     });
 
     if (!skill) {
@@ -407,7 +461,7 @@ export class SkillsService implements OnModuleInit {
     const saved = await this.skillRepository.save(newSkill);
 
     // 新提交一律 pending，等待管理员人工审核（审核通过由 approveSkill 触发 Git 发布）
-    return saved;
+    return this.stripZipBlob(saved);
   }
 
   /**
@@ -434,7 +488,20 @@ export class SkillsService implements OnModuleInit {
       this.zipBufferOf(updated),
       updated.version,
     );
-    return updated;
+    return this.stripZipBlob(updated);
+  }
+
+  /**
+   * 剥离响应中的 zipBlob 字段
+   *
+   * 写操作（上传/审核/计数等）需要读出完整实体（Git 发布要用原始 ZIP），
+   * 但返回给前端时必须去掉这个数 MB 的 base64 字段，
+   * 否则单次审核响应就有数 MB，且前端会把它长期留在内存里。
+   * @param skill 技能实体
+   */
+  private stripZipBlob(skill: SkillEntity): SkillEntity {
+    const { zipBlob: _zipBlob, ...rest } = skill;
+    return rest as SkillEntity;
   }
 
   /**
@@ -479,7 +546,7 @@ export class SkillsService implements OnModuleInit {
     skill.reviewedAt = new Date().toISOString();
     skill.adminFeedback = feedback || '未通过安全合规审查，请修复后重新提交。';
 
-    return this.skillRepository.save(skill);
+    return this.stripZipBlob(await this.skillRepository.save(skill));
   }
 
   /**
@@ -504,7 +571,7 @@ export class SkillsService implements OnModuleInit {
     const updated = await this.skillRepository.save(skill);
     // 下架后需重建 Git 市场索引，避免客户端仍能安装
     await this.rebuildGitMarketIndex();
-    return updated;
+    return this.stripZipBlob(updated);
   }
 
   /**
@@ -527,7 +594,7 @@ export class SkillsService implements OnModuleInit {
       this.zipBufferOf(updated),
       updated.version,
     );
-    return updated;
+    return this.stripZipBlob(updated);
   }
 
   /**
@@ -564,18 +631,30 @@ export class SkillsService implements OnModuleInit {
 
     if (missing.length === 0) return;
 
+    let repaired = 0;
     for (const skill of missing) {
-      await this.gitMarketService.syncApprovedSkillToGit(
-        skill,
-        this.zipBufferOf(skill),
-        skill.version,
-      );
+      // 单个技能的 ZIP 损坏不能让整个服务起不来：
+      // syncApprovedSkillToGit 内部会解析 ZIP，脏数据会抛异常，
+      // 而这里处于 onModuleInit，未捕获的异常会导致进程直接退出。
+      try {
+        await this.gitMarketService.syncApprovedSkillToGit(
+          skill,
+          this.zipBufferOf(skill),
+          skill.version,
+        );
+        repaired += 1;
+      } catch (error) {
+        console.warn(
+          `⚠️  技能 ${skill.slug} 同步至 Git 市场失败，已跳过（不影响服务启动）:`,
+          (error as Error).message,
+        );
+      }
     }
     // 补齐后再全量重建一次索引，剔除历史命名残留的插件目录与清单条目
     await this.rebuildGitMarketIndex();
 
     console.log(
-      `🔧 Git 市场索引已自愈：修复/补齐 ${missing.length} 个已上架插件 (共 ${approved.length} 个在线)`,
+      `🔧 Git 市场索引已自愈：修复/补齐 ${repaired}/${missing.length} 个已上架插件 (共 ${approved.length} 个在线)`,
     );
   }
 
@@ -606,7 +685,7 @@ export class SkillsService implements OnModuleInit {
 
     const step = delta >= 0 ? 1 : -1;
     skill[metric] = Math.max(0, (skill[metric] ?? 0) + step);
-    return this.skillRepository.save(skill);
+    return this.stripZipBlob(await this.skillRepository.save(skill));
   }
 
   /**
@@ -619,7 +698,7 @@ export class SkillsService implements OnModuleInit {
     if (!skill) throw new NotFoundException('未找到对应技能');
 
     skill.auditScore = Math.max(0, Math.min(100, Math.round(score)));
-    return this.skillRepository.save(skill);
+    return this.stripZipBlob(await this.skillRepository.save(skill));
   }
 
   /**
@@ -640,6 +719,6 @@ export class SkillsService implements OnModuleInit {
     if (clean.length > 0 && !skill.expertDomain) {
       skill.expertDomain = clean[0];
     }
-    return this.skillRepository.save(skill);
+    return this.stripZipBlob(await this.skillRepository.save(skill));
   }
 }
