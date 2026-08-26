@@ -1551,7 +1551,11 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <span className="font-bold text-slate-800">SkillHub 企业内网 AI 技能市场</span>
-            <span>·</span>
+            {/* 后端连接状态点：绿=已连接 / 琥珀=离线（演示数据） / 灰色闪烁=连接中 */}
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${backendOnline === false ? 'bg-amber-400' : backendOnline ? 'bg-emerald-500' : 'bg-slate-300 animate-pulse'}`}
+              title={backendOnline === false ? '后端离线：当前使用本地演示数据' : backendOnline ? '企业后端已连接' : '正在连接企业后端'}
+            />
             <span>风控中心 v3.4 (驱动: {deepseekConfig.modelName})</span>
           </div>
           <div className="flex items-center gap-4">

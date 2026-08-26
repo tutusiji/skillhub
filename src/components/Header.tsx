@@ -112,10 +112,6 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="text-lg font-black tracking-tight bg-gradient-to-r from-slate-900 via-indigo-950 to-indigo-700 bg-clip-text text-transparent">
                   SkillHub
                 </span>
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${backendOnline === false ? 'bg-amber-400' : backendOnline ? 'bg-emerald-500' : 'bg-slate-300 animate-pulse'}`}
-                  title={backendOnline === false ? '后端离线：当前使用本地演示数据' : backendOnline ? '企业后端已连接' : '正在连接企业后端'}
-                />
               </div>
               <div className="text-[10px] text-slate-400 font-mono hidden sm:block">
                 AI 技能与 MCP 插件市场
