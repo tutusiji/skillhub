@@ -1,4 +1,4 @@
-# SkillHub Kubernetes 部署清单（内网）
+# SkillHub Kubernetes 部署清单（内网 K8s + 远程 PostgreSQL）
 # 用法：kubectl apply -f deploy/k8s/skillhub.yaml
 # 完整说明见 docs/deployment-guide.md 第 8 节
 apiVersion: v1
@@ -13,7 +13,8 @@ metadata:
   namespace: skillhub
 type: Opaque
 stringData:
-  DB_PASSWORD: "your-strong-password"      # 生产建议用外部 Secret 管理（如 SealedSecret）
+  # 远程 PostgreSQL 连接（生产建议用外部 Secret 管理，如 SealedSecret / 集群 Secret 注入）
+  DB_PASSWORD: "your-strong-password"
   JWT_SECRET: "replace-with-random-64-hex"
   LLM_API_KEY: ""
 ---
@@ -23,13 +24,17 @@ metadata:
   name: skillhub-config
   namespace: skillhub
 data:
-  DB_TYPE: "postgres"
-  DB_HOST: "skillhub-postgres"
+  # 环境标识：dev / test / prod，决定是否加载 .env.<APP_ENV>（K8s 下以这里为准）
+  APP_ENV: "prod"
+  # 远程 PostgreSQL 连接（集群外，按内网实际地址填写）
+  DB_HOST: "pg-prod.internal.corp"
   DB_PORT: "5432"
   DB_USER: "skillhub"
   DB_NAME: "skillhub"
-  LLM_BASE_URL: "https://api.deepseek.com/v1"
-  LLM_MODEL_NAME: "deepseek-chat"
+  # 或用 DATABASE_URL 一次性指定（优先级更高，密码放 Secret）：
+  # DATABASE_URL: "postgres://skillhub:password@pg-prod.internal.corp:5432/skillhub"
+  LLM_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  LLM_MODEL_NAME: "qwen-plus"
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -48,7 +53,7 @@ metadata:
   name: skillhub
   namespace: skillhub
 spec:
-  replicas: 1            # 单副本即可；多副本需共享 storage（RWX/NFS）与数据库
+  replicas: 1            # 单副本即可；多副本需共享 storage（RWX/NFS）
   selector:
     matchLabels:
       app: skillhub
@@ -59,7 +64,7 @@ spec:
     spec:
       containers:
         - name: skillhub
-          image: skillhub:latest
+          image: harbor.internal.corp/skillhub/skillhub:latest   # 替换为内网 registry 地址
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3001
@@ -100,52 +105,6 @@ spec:
   ports:
     - port: 3001
       targetPort: 3001
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: skillhub-postgres
-  namespace: skillhub
-spec:
-  selector:
-    matchLabels:
-      app: skillhub-postgres
-  template:
-    metadata:
-      labels:
-        app: skillhub-postgres
-    spec:
-      containers:
-        - name: postgres
-          image: postgres:16-alpine
-          env:
-            - name: POSTGRES_USER
-              value: skillhub
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: skillhub-secrets
-                  key: DB_PASSWORD
-            - name: POSTGRES_DB
-              value: skillhub
-          volumeMounts:
-            - name: data
-              mountPath: /var/lib/postgresql/data
-      volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: skillhub-postgres-data
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: skillhub-postgres-data
-  namespace: skillhub
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 10Gi
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress

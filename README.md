@@ -236,7 +236,7 @@ pnpm run build && pnpm run server:build
 pnpm run server:start          # 或用 systemd 常驻
 ```
 
-内网部署支持四种方式，完整指南（数据库初始化、systemd、Docker / docker-compose、Kubernetes、内网域名与 frp/HTTPS 接入、备份升级）见：
+**推荐部署方式：Kubernetes + 远程 PostgreSQL**（应用镜像构建推送一次到内网 registry，数据库用集群外远程实例，无需为数据库打镜像）。完整指南（数据库配置、systemd、Docker、Kubernetes、内网域名与 frp/HTTPS 接入、备份升级）见：
 **[`docs/deployment-guide.md`](docs/deployment-guide.md)**。systemd 用户服务与 frp 简版见 [`deploy/README.md`](deploy/README.md)。
 
 要点：对外入口指向后端 **3001**（不是 Vite 的 7001）；安装指令中的市场地址随访问域名动态生成。

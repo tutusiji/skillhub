@@ -1,7 +1,12 @@
 # SkillHub 内网部署指南
 
-本指南覆盖 SkillHub 在内网环境的完整部署：数据库准备与迁移、直接部署（systemd）、
-容器化（Docker / docker-compose）、Kubernetes，以及内网接入（域名/端口/frp/HTTPS 反代）。
+> **推荐部署方式：Kubernetes + 远程 PostgreSQL**（内网已有 K8s 平台时）。
+> 应用镜像构建推送一次到内网 registry 后由 Deployment 拉取；PostgreSQL 使用集群外远程实例，
+> 不需要在集群内部署数据库、也不需要为数据库打镜像。见第 8 节。
+
+本指南覆盖 SkillHub 在内网环境的完整部署：数据库准备与配置（远程 PostgreSQL）、
+直接部署（systemd）、容器化（Docker / docker-compose）、Kubernetes，
+以及内网接入（域名/端口/frp/HTTPS 反代）。
 
 ---
 
@@ -270,174 +275,37 @@ docker compose logs -f skillhub
 
 ---
 
-## 8. 方式 C：Kubernetes
+## 8. 方式 C：Kubernetes（内网 K8s + 远程 PostgreSQL，推荐）
 
-### 8.1 命名空间与配置
+内网已有 K8s 平台时推荐此方式。**PostgreSQL 使用集群外的远程实例**（远程连接形式），
+集群内不部署 postgres，因此**不需要为数据库打镜像**；应用镜像构建推送一次到内网
+registry 后由 Deployment 拉取。
 
-`deploy/k8s/skillhub.yaml`（可直接 `kubectl apply -f`）：
+### 8.1 镜像
 
-```yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: skillhub
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: skillhub-secrets
-  namespace: skillhub
-type: Opaque
-stringData:
-  DB_PASSWORD: "your-strong-password"      # 生产用外部 Secret 管理
-  JWT_SECRET: "replace-with-random-64-hex"
-  LLM_API_KEY: ""
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: skillhub-config
-  namespace: skillhub
-data:
-  DB_TYPE: "postgres"
-  DB_HOST: "skillhub-postgres"
-  DB_PORT: "5432"
-  DB_USER: "skillhub"
-  DB_NAME: "skillhub"
-  LLM_BASE_URL: "https://api.deepseek.com/v1"
-  LLM_MODEL_NAME: "deepseek-chat"
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: skillhub-storage
-  namespace: skillhub
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 2Gi
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: skillhub
-  namespace: skillhub
-spec:
-  replicas: 1            # 单副本即可（内网工具型应用）；多副本需共享 storage/DB
-  selector:
-    matchLabels:
-      app: skillhub
-  template:
-    metadata:
-      labels:
-        app: skillhub
-    spec:
-      containers:
-        - name: skillhub
-          image: skillhub:latest        # 或 registry 地址
-          imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 3001
-          envFrom:
-            - configMapRef:
-                name: skillhub-config
-            - secretRef:
-                name: skillhub-secrets
-          volumeMounts:
-            - name: storage
-              mountPath: /app/server/storage
-          resources:
-            requests: { cpu: 250m, memory: 256Mi }
-            limits:   { cpu: "1", memory: 1Gi }
-          readinessProbe:
-            httpGet: { path: /api/v1/skills, port: 3001 }
-            initialDelaySeconds: 15
-            periodSeconds: 10
-      volumes:
-        - name: storage
-          persistentVolumeClaim:
-            claimName: skillhub-storage
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: skillhub
-  namespace: skillhub
-spec:
-  selector:
-    app: skillhub
-  ports:
-    - port: 3001
-      targetPort: 3001
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: skillhub-postgres
-  namespace: skillhub
-spec:
-  selector:
-    matchLabels:
-      app: skillhub-postgres
-  template:
-    metadata:
-      labels:
-        app: skillhub-postgres
-    spec:
-      containers:
-        - name: postgres
-          image: postgres:16-alpine
-          env:
-            - name: POSTGRES_USER
-              value: skillhub
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef: { name: skillhub-secrets, key: DB_PASSWORD }
-            - name: POSTGRES_DB
-              value: skillhub
-          volumeMounts:
-            - name: data
-              mountPath: /var/lib/postgresql/data
-      volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: skillhub-postgres-data
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: skillhub-postgres-data
-  namespace: skillhub
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 10Gi
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: skillhub
-  namespace: skillhub
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "64m"   # 上传 ZIP 需要
-spec:
-  ingressClassName: nginx
-  rules:
-    - host: skillhub.corp            # 内网域名，按环境替换
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: skillhub
-                port:
-                  number: 3001
+仓库根目录 `Dockerfile` 已就绪（多阶段：构建含 git 与原生模块编译，运行镜像仅含 git）。
+
+```bash
+# 构建并推送到内网 registry（如 Harbor）
+docker build -t harbor.internal.corp/skillhub/skillhub:latest .
+docker push harbor.internal.corp/skillhub/skillhub:latest
 ```
 
-使用：
+> 若内网有统一 CI（GitLab CI / 云原生构建管道），接入即可：流水线执行
+> `pnpm install && pnpm run build && pnpm run server:build` 后按上述 Dockerfile 出镜像。
+> 日常开发迭代不需要每次打镜像——只有服务端代码变化时才需重建推送。
+
+### 8.2 清单
+
+`deploy/k8s/skillhub.yaml` 为**远程 PostgreSQL 版**（可直接 `kubectl apply -f`），内容：
+
+- `Namespace skillhub`
+- `Secret skillhub-secrets`：`DB_PASSWORD`（远程 PG 密码）、`JWT_SECRET`、`LLM_API_KEY`
+- `ConfigMap skillhub-config`：`APP_ENV`、远程 PG 的 `DB_HOST/DB_PORT/DB_USER/DB_NAME`（或 `DATABASE_URL`）、`LLM_BASE_URL/LLM_MODEL_NAME`
+- `Deployment skillhub`：单副本，`image` 指向内网 registry，挂载 `skillhub-storage` PVC（Git 市场工作树）
+- `Service skillhub`（3001）+ `Ingress skillhub`（`proxy-body-size: 64m` 供 ZIP 上传）
+
+使用前只需改两处：`image:` 换成你的 registry 地址；`ConfigMap` / `Secret` 填远程 PG 与密钥。
 
 ```bash
 kubectl apply -f deploy/k8s/skillhub.yaml
@@ -445,10 +313,8 @@ kubectl -n skillhub rollout status deployment/skillhub
 kubectl -n skillhub get ingress
 ```
 
-> 多副本部署注意：`/app/server/storage` 是 Git 市场工作树，多副本需挂共享存储（NFS/RWX），
-> 否则各副本的插件市场索引不一致；数据库本身多副本安全。
-
----
+> 多副本注意：`/app/server/storage` 是 Git 市场工作树，多副本需挂共享存储（NFS/RWX），
+> 否则各副本的插件市场索引不一致。内网工具型应用单副本足够。
 
 ## 9. 内网接入
 
