@@ -125,10 +125,10 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={() => onSelectTab('market')}
               id="nav-market"
-              className={`px-3.5 py-2 rounded-xl transition-all ${
+              className={`px-3.5 py-2 rounded-xl transition-all border focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${
                 currentTab === 'market'
-                  ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                  ? 'bg-indigo-50 text-indigo-700 font-bold border-indigo-200/70 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 border-transparent'
               }`}
             >
               技能集市
@@ -138,10 +138,10 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={() => onSelectTab('demands')}
               id="nav-demands"
-              className={`relative px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
+              className={`relative px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 border focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 ${
                 currentTab === 'demands'
-                  ? 'bg-amber-50 text-amber-900 font-bold border border-amber-300 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                  ? 'bg-amber-50 text-amber-900 font-bold border-amber-300 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 border-transparent'
               }`}
             >
               <Coins className="w-3.5 h-3.5 text-amber-500" />
@@ -153,10 +153,10 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 onClick={() => onSelectTab('audit')}
                 id="nav-audit"
-                className={`relative px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
+                className={`relative px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 border focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${
                   currentTab === 'audit'
-                    ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70 shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    ? 'bg-indigo-50 text-indigo-700 font-bold border-indigo-200/70 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 border-transparent'
                 }`}
               >
                 <ShieldCheck className="w-4 h-4 text-indigo-600" />
@@ -173,10 +173,10 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 onClick={() => onSelectTab('rules')}
                 id="nav-rules"
-                className={`px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
+                className={`px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 border focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${
                   currentTab === 'rules'
-                    ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70 shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    ? 'bg-indigo-50 text-indigo-700 font-bold border-indigo-200/70 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 border-transparent'
                 }`}
               >
                 <Sliders className="w-4 h-4 text-indigo-600" />

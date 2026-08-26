@@ -1688,29 +1688,6 @@ export default function App() {
         onClose={() => setShowCommandPalette(false)}
         skills={skills}
         onSelectSkill={(skill) => handleOpenSkillDetail(skill)}
-        onNavigateTab={(tab) => {
-          if (tab === 'upload') {
-            if (requireAuth('发布新技能')) {
-              setShowUploadModal(true);
-            }
-          }
-          if (tab === 'rules') {
-            if (!currentUser) {
-              requireAuth('配置风控中心');
-              return;
-            }
-            if (canAccessRules) navigate('rules');
-            else addToast('warning', '权限不足', '风控中心仅限管理员访问');
-          }
-          if (tab === 'audit') {
-            if (!currentUser) {
-              requireAuth('访问审核管理中心');
-              return;
-            }
-            if (canAccessAudit) navigate('audit');
-            else addToast('warning', '权限不足', '审核管理中心仅限管理员访问');
-          }
-        }}
       />
 
       {/* 8. Floating Back to Top and Feedback Widget */}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Terminal, ShieldCheck, ArrowRight, X } from 'lucide-react';
+import { Search, ArrowRight, X } from 'lucide-react';
 import { SkillItem } from '../types';
 
 interface CommandPaletteModalProps {
@@ -7,7 +7,6 @@ interface CommandPaletteModalProps {
   onClose: () => void;
   skills: SkillItem[];
   onSelectSkill: (skill: SkillItem) => void;
-  onNavigateTab: (tab: any) => void;
 }
 
 export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
@@ -15,7 +14,6 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   onClose,
   skills,
   onSelectSkill,
-  onNavigateTab
 }) => {
   const [query, setQuery] = useState('');
 
@@ -109,24 +107,6 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
               </div>
             </div>
           ))}
-
-          {/* Quick shortcuts */}
-          <div className="pt-2 mt-2 border-t border-slate-100 grid grid-cols-2 gap-2 text-slate-600 text-[11px]">
-            <button
-              onClick={() => { onNavigateTab('upload'); onClose(); }}
-              className="p-2 rounded-xl hover:bg-slate-100 text-left flex items-center gap-2 font-medium"
-            >
-              <Terminal className="w-3.5 h-3.5 text-indigo-600" />
-              <span>快速发布新技能</span>
-            </button>
-            <button
-              onClick={() => { onNavigateTab('rules'); onClose(); }}
-              className="p-2 rounded-xl hover:bg-slate-100 text-left flex items-center gap-2 font-medium"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-              <span>风控中心</span>
-            </button>
-          </div>
         </div>
       </div>
     </div>

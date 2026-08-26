@@ -9,6 +9,7 @@ import {
   Tag,
 } from 'lucide-react';
 import { FeedbackItem, UserAccount } from '../types';
+import { PopconfirmBubble } from './PopconfirmBubble';
 
 interface FeedbackAdminViewProps {
   currentUser: UserAccount;
@@ -41,9 +42,7 @@ export const FeedbackAdminView: React.FC<FeedbackAdminViewProps> = ({
   const isPrivileged = currentUser.role === 'admin' || currentUser.role === 'super_admin';
 
   const handleDelete = (item: FeedbackItem) => {
-    if (window.confirm(`确定删除建议「${item.title}」吗？删除后不可恢复。`)) {
-      onDeleteFeedback(item.id);
-    }
+    onDeleteFeedback(item.id);
   };
 
   return (
@@ -177,13 +176,24 @@ export const FeedbackAdminView: React.FC<FeedbackAdminViewProps> = ({
                       </p>
                     </div>
 
-                    <button
-                      onClick={() => handleDelete(item)}
-                      className="shrink-0 p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                      title="删除建议"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <PopconfirmBubble
+                      title={`确定删除建议「${item.title}」？`}
+                      description="删除后不可恢复，建议一般用于已处理或无效条目。"
+                      type="danger"
+                      confirmText="确认删除"
+                      cancelText="取消"
+                      placement="top-left"
+                      onConfirm={() => handleDelete(item)}
+                      trigger={({ onClick }) => (
+                        <button
+                          onClick={onClick}
+                          className="shrink-0 p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                          title="删除建议"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    />
                   </div>
                 </div>
               );

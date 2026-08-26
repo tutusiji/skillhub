@@ -18,6 +18,7 @@ import {
   ClipboardCheck,
 } from 'lucide-react';
 import { UserAccount, UserRole } from '../types';
+import { PopconfirmBubble } from './PopconfirmBubble';
 
 interface AdminSettingsViewProps {
   currentUser: UserAccount | null;
@@ -128,38 +129,35 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
     );
   };
 
-  const handlePromoteToAdmin = (targetUser: UserAccount) => {
+  /**
+   * 委任管理员的前置检查：超管权限 + 目标非超管。
+   * 返回 true 表示可继续，false 表示已 toast 拒绝、不应再开气泡。
+   */
+  const canPromoteToAdmin = (targetUser: UserAccount): boolean => {
     if (!isSuperAdmin) {
       onToast('error', '权限不足', '仅超级管理员具备委任新管理员的权限');
-      return;
+      return false;
     }
-
     if (targetUser.role === 'super_admin') {
       onToast('warning', '不可更改', '该用户为超级管理员，不可降级或更改');
-      return;
+      return false;
     }
-
-    if (window.confirm(`确定将用户「${targetUser.name}」(工号: ${targetUser.employeeId || '-'}) 设为管理员吗？\n该用户将获得技能审核、安全风控和需求审批等全部管理权限（但无法继续设置其他管理员）。`)) {
-      onUpdateUserRole(targetUser.id, 'admin');
-      onToast('success', '管理员委任成功', `已成功将「${targetUser.name}」设为管理员`);
-    }
+    return true;
   };
 
-  const handleDemoteToDeveloper = (targetUser: UserAccount) => {
+  /**
+   * 撤销管理员的前置检查：超管权限 + 目标非超管。
+   */
+  const canDemoteAdmin = (targetUser: UserAccount): boolean => {
     if (!isSuperAdmin) {
       onToast('error', '权限不足', '仅超级管理员具备撤销管理员权限的能力');
-      return;
+      return false;
     }
-
     if (targetUser.role === 'super_admin') {
       onToast('error', '禁止操作', '超级管理员是系统的根本权限，不可撤销自身');
-      return;
+      return false;
     }
-
-    if (window.confirm(`确定撤销用户「${targetUser.name}」(工号: ${targetUser.employeeId || '-'}) 的管理员权限吗？\n其角色将被重置为普通用户。`)) {
-      onUpdateUserRole(targetUser.id, 'user');
-      onToast('info', '权限已撤销', `已将「${targetUser.name}」的管理员权限收回并重置为普通用户`);
-    }
+    return true;
   };
 
   // If not super admin, show access denied
@@ -420,21 +418,61 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                         <span>超管固有保护</span>
                       </div>
                     ) : isAdminUser ? (
-                      <button
-                        onClick={() => handleDemoteToDeveloper(user)}
-                        className="px-3.5 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition-all flex items-center gap-1.5"
-                      >
-                        <UserX className="w-3.5 h-3.5" />
-                        <span>解除管理员</span>
-                      </button>
+                      <PopconfirmBubble
+                        title={`确定撤销用户「${user.name}」的管理员权限？`}
+                        description={`工号：${user.employeeId || '-'}。撤销后其角色将被重置为普通用户，可随时再次委任。`}
+                        type="warning"
+                        confirmText="确认撤销"
+                        cancelText="取消"
+                        placement="top-left"
+                        onConfirm={() => {
+                          onUpdateUserRole(user.id, 'user');
+                          onToast('info', '权限已撤销', `已将「${user.name}」的管理员权限收回并重置为普通用户`);
+                        }}
+                        trigger={({ onClick }) => (
+                          <button
+                            onClick={(e) => {
+                              if (!canDemoteAdmin(user)) {
+                                e.stopPropagation();
+                                return;
+                              }
+                              onClick(e);
+                            }}
+                            className="px-3.5 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition-all flex items-center gap-1.5"
+                          >
+                            <UserX className="w-3.5 h-3.5" />
+                            <span>解除管理员</span>
+                          </button>
+                        )}
+                      />
                     ) : (
-                      <button
-                        onClick={() => handlePromoteToAdmin(user)}
-                        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95"
-                      >
-                        <UserCheck className="w-3.5 h-3.5" />
-                        <span>设为管理员</span>
-                      </button>
+                      <PopconfirmBubble
+                        title={`确定将用户「${user.name}」设为管理员？`}
+                        description={`工号：${user.employeeId || '-'}。该用户将获得技能审核、安全风控和需求审批等全部管理权限（但无法继续设置其他管理员）。`}
+                        type="warning"
+                        confirmText="确认委任"
+                        cancelText="取消"
+                        placement="top-left"
+                        onConfirm={() => {
+                          onUpdateUserRole(user.id, 'admin');
+                          onToast('success', '管理员委任成功', `已成功将「${user.name}」设为管理员`);
+                        }}
+                        trigger={({ onClick }) => (
+                          <button
+                            onClick={(e) => {
+                              if (!canPromoteToAdmin(user)) {
+                                e.stopPropagation();
+                                return;
+                              }
+                              onClick(e);
+                            }}
+                            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95"
+                          >
+                            <UserCheck className="w-3.5 h-3.5" />
+                            <span>设为管理员</span>
+                          </button>
+                        )}
+                      />
                     )}
                   </div>
                 </div>
