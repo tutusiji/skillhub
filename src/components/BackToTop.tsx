@@ -38,7 +38,7 @@ export const BackToTop: React.FC<BackToTopProps> = ({ onOpenFeedback, showSugges
 
   return (
     // 全局悬浮：固定在主内容右侧（右下角偏上），所有页面始终存在、不随内容滚动
-    <div className="fixed bottom-24 right-6 z-40 flex flex-col gap-2.5 items-end">
+    <div className="fixed bottom-24 right-6 z-40 flex flex-col gap-2.5 items-center">
       {/* 建议反馈悬浮按钮（全员可见）——竖向文字样式 */}
       {showSuggestionButton && (
         <button
