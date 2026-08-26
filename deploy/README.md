@@ -2,6 +2,10 @@
 
 > 完整内网部署指南（数据库迁移 / Docker / Kubernetes / frp / HTTPS 反代 / 备份升级）见
 > [`docs/deployment-guide.md`](../docs/deployment-guide.md)。本文为 systemd 直接部署的速查。
+>
+> K8s 部署下 **Git Smart HTTP 协议端点**（`skillhub.git`、`market.git`）的
+> 专项注意事项（ingress body size / streaming 超时 / 探针 / 备份 / 排障）见
+> [`docs/git-smart-http-k8s.md`](../docs/git-smart-http-k8s.md)。
 
 ## 单进程生产模式
 

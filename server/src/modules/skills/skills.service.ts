@@ -23,11 +23,15 @@ export interface FileTreeNode {
 }
 
 /**
- * 技能列表/详情对外暴露的列白名单（显式排除 zipBlob）
+ * 技能列表对外暴露的列白名单（显式排除 zipBlob 与 fileTree）
  *
- * zipBlob 存的是上传 ZIP 包的 base64，体积可达数 MB/条，只在两处需要：
- * 原始包下载 (getOriginalZip) 与 Git 市场发布 (zipBufferOf)，
- * 它们都按 id 单独查询，因此列表与详情一律不返回该列。
+ * 列表接口需要能秒级渲染，单条数据必须保持轻量。两个高体积字段被显式排除：
+ *
+ * 1. zipBlob：上传 ZIP 包的 base64，体积可达数 MB/条；只在两处需要 —
+ *    原始包下载 (getOriginalZip) 与 Git 市场发布 (zipBufferOf)，按 id 单独查。
+ * 2. fileTree：详情页源码预览用的文件树，每条记录的 content 字段累计可达数十 MB
+ *    （曾经一个技能压了 26.7 MB）。列表只展示卡片元信息，不需要源码；
+ *    详情页与审核页通过 /api/v1/skills/:slug 单独拿全量。
  */
 const LIST_SKILL_COLUMNS = [
   'id',
@@ -47,7 +51,6 @@ const LIST_SKILL_COLUMNS = [
   'stars',
   'permissions',
   'installCommands',
-  'fileTree',
   'readme',
   'expertDomain',
   'expertDomains',
@@ -58,6 +61,16 @@ const LIST_SKILL_COLUMNS = [
   'adminFeedback',
   'createdAt',
   'updatedAt',
+] as (keyof SkillEntity)[];
+
+/**
+ * 技能详情对外暴露的列白名单（list 全部 + fileTree，仍排除 zipBlob）
+ * 详情页源码预览 / 审核页文件树展开 / ZIP 兜底重建都需要 fileTree，但 zipBlob
+ * 永远走单独接口 /skills/:id/zip，不在常规 JSON 响应里返回。
+ */
+const DETAIL_SKILL_COLUMNS = [
+  ...LIST_SKILL_COLUMNS,
+  'fileTree',
 ] as (keyof SkillEntity)[];
 
 /**
@@ -206,10 +219,8 @@ export class SkillsService implements OnModuleInit {
     let skills = await this.skillRepository.find({
       where,
       order: { createdAt: 'DESC' },
-      // 列表接口必须排除 zipBlob：它是整个 ZIP 包的 base64（单个技能可达数 MB），
-      // 一旦随列表下发，响应体会随技能数线性膨胀到几十 MB，
-      // 前端首屏要等它传完才能渲染真实数据（表现为「先闪一下旧数据再消失」）。
-      // 原始包由 /skills/:id/zip 单独下载，列表与详情都不需要它。
+      // 列表必须只取元信息列：fileTree 累计可达数十 MB（详情页才需要）、
+      // zipBlob 单条数 MB（只走 /skills/:id/zip）。详见 LIST_SKILL_COLUMNS 注释。
       select: LIST_SKILL_COLUMNS,
     });
 
@@ -234,8 +245,8 @@ export class SkillsService implements OnModuleInit {
     const clean = slugOrId.startsWith('@') ? slugOrId : `@skillhub/${slugOrId}`;
     const skill = await this.skillRepository.findOne({
       where: [{ slug: slugOrId }, { slug: clean }, { id: slugOrId }],
-      // 详情页只需要文件树与元数据；原始 ZIP 走 /skills/:id/zip 下载
-      select: LIST_SKILL_COLUMNS,
+      // 详情页需要文件树做源码预览；原始 ZIP 仍走 /skills/:id/zip 下载
+      select: DETAIL_SKILL_COLUMNS,
     });
 
     if (!skill) {

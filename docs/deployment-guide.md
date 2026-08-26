@@ -316,6 +316,9 @@ kubectl -n skillhub get ingress
 > 多副本注意：`/app/server/storage` 是 Git 市场工作树，多副本需挂共享存储（NFS/RWX），
 > 否则各副本的插件市场索引不一致。内网工具型应用单副本足够。
 
+> **Git Smart HTTP 链路的 K8s 专项事项**（ingress body size、streaming 超时、探针选择、
+> 备份方案、故障排查命令）见 [`git-smart-http-k8s.md`](./git-smart-http-k8s.md)。
+
 ## 9. 内网接入
 
 ### 9.1 域名与端口规划
