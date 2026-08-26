@@ -14,6 +14,7 @@ import {
 import confetti from 'canvas-confetti';
 import { SkillItem } from '../types';
 import { getExpertDomainMeta } from '../data/expertDomains';
+import { useExpertDomains } from '../hooks/useExpertDomains';
 
 interface SkillCardProps {
   skill: SkillItem;
@@ -44,13 +45,14 @@ export const SkillCard: React.FC<SkillCardProps> = ({
   onCopyInstallCmd
 }) => {
   const [showCliDropdown, setShowCliDropdown] = useState(false);
+  const { domains: expertDomains } = useExpertDomains();
 
-  const categoryMeta = CATEGORY_NAMES[skill.category] || { 
-    label: skill.category, 
-    color: 'bg-slate-100 text-slate-700 border-slate-200' 
+  const categoryMeta = CATEGORY_NAMES[skill.category] || {
+    label: skill.category,
+    color: 'bg-slate-100 text-slate-700 border-slate-200'
   };
 
-  const domainMeta = getExpertDomainMeta(skill.expertDomain);
+  const domainMeta = getExpertDomainMeta(skill.expertDomain, expertDomains);
 
   const handleLike = (e: React.MouseEvent) => {
     e.stopPropagation();

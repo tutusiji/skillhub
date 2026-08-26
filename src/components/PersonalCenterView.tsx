@@ -32,6 +32,8 @@ import {
 import { SkillItem, UserAccount, SkillDemand } from '../types';
 import { SkillCard } from './SkillCard';
 import { getExpertDomainMeta } from '../data/expertDomains';
+import { useExpertDomains } from '../hooks/useExpertDomains';
+import { PopconfirmBubble } from './PopconfirmBubble';
 
 interface PersonalCenterViewProps {
   currentUser: UserAccount | null;
@@ -74,6 +76,8 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<PersonalTab>('demands');
   const [searchQuery, setSearchQuery] = useState('');
+  // 专家组数据走 hook（与首页/管理端/征集广场保持同一份），徽章名称才跟随后端修改
+  const { domains: expertDomains } = useExpertDomains();
 
   // Unauthenticated Guard
   if (!currentUser) {
@@ -412,7 +416,7 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
           ) : (
             <div className="space-y-3.5">
               {filteredDemands.map(demand => {
-                const domainMeta = getExpertDomainMeta(demand.targetDomain);
+                const domainMeta = getExpertDomainMeta(demand.targetDomain, expertDomains);
                 return (
                   <div
                     key={demand.id}
@@ -492,18 +496,27 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => {
-                            if (window.confirm('确定撤回并删除此需求吗？奖励的积分将立即全额原路退回您的账户。')) {
-                              onDeleteDemand(demand.id);
-                              onToast('info', '需求已撤销', '奖励积分已退回您的账户');
-                            }
+                        <PopconfirmBubble
+                          title="确定撤回并删除此需求吗？"
+                          description="奖励的积分将立即全额原路退回您的账户，此操作不可撤销。"
+                          type="danger"
+                          confirmText="确认撤销"
+                          cancelText="取消"
+                          placement="top-right"
+                          onConfirm={() => {
+                            onDeleteDemand(demand.id);
+                            onToast('info', '需求已撤销', '奖励积分已退回您的账户');
                           }}
-                          className="px-3 py-1.5 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 font-semibold flex items-center gap-1 transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>撤销需求 (退积分)</span>
-                        </button>
+                          trigger={({ onClick }) => (
+                            <button
+                              onClick={onClick}
+                              className="px-3 py-1.5 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 font-semibold flex items-center gap-1 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>撤销需求 (退积分)</span>
+                            </button>
+                          )}
+                        />
 
                         <button
                           onClick={() => onSelectDemand(demand)}

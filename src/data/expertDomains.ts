@@ -103,10 +103,14 @@ export const EXPERT_DOMAINS: ExpertDomainInfo[] = [
   }
 ];
 
-export const getExpertDomainInfo = (id?: ExpertDomain): ExpertDomainInfo => {
-  if (!id || id === 'all') return EXPERT_DOMAINS[0];
-  const found = EXPERT_DOMAINS.find(d => d.id === id);
-  return found || EXPERT_DOMAINS[0];
+export const getExpertDomainMeta = (id?: ExpertDomain | string, list?: ExpertDomainInfo[]): ExpertDomainInfo => {
+  // 'all' 是虚拟项（不存于后端），用首项兜底；优先取传入的 list，没有再退回静态常量
+  if (!id || id === 'all') return (list && list[0]) || EXPERT_DOMAINS[0];
+  // 调用方传了后端列表时优先用列表里的（覆盖了数据库的最新 shortLabel/name/配色）
+  if (list) {
+    const fromList = list.find(d => d.id === id);
+    if (fromList) return fromList;
+  }
+  // 后端无该 ID 或调用方没传 list：退回编译期常量作为离线兜底
+  return EXPERT_DOMAINS.find(d => d.id === id) || EXPERT_DOMAINS[0];
 };
-
-export const getExpertDomainMeta = getExpertDomainInfo;

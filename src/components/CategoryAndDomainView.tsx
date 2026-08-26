@@ -18,6 +18,7 @@ import { ExpertDomain, ExpertDomainInfo, SkillCategoryItem, SkillItem, UserAccou
 import { getExpertDomainMeta } from '../data/expertDomains';
 import { api, ExpertDomainPayload } from '../services/api';
 import { useExpertDomains } from '../hooks/useExpertDomains';
+import { PopconfirmBubble } from './PopconfirmBubble';
 
 interface CategoryAndDomainViewProps {
   currentUser: UserAccount;
@@ -164,14 +165,11 @@ export const CategoryAndDomainView: React.FC<CategoryAndDomainViewProps> = ({
     }
   };
 
-  /** 删除专家组 */
-  const handleDeleteDomain = async (d: ExpertDomainInfo) => {
-    const memberCount = approvedSkills.filter(s => (s.expertDomains || []).includes(d.id as string)).length;
-    if (!window.confirm(
-      `确定删除专家组「${d.name}」吗？\n${memberCount > 0 ? `有 ${memberCount} 个技能归属于该专家组，删除后这些技能的该归属将被一并移除。` : '删除后不可恢复。'}`
-    )) {
-      return;
-    }
+  /**
+   * 删除专家组（已二次确认，由 PopconfirmBubble 触发）
+   * 单独抽出便于 PopconfirmBubble.onConfirm 直接复用，memberCount 由调用方计算后传入。
+   */
+  const performDeleteDomain = async (d: ExpertDomainInfo) => {
     try {
       await api.deleteExpertDomain(d.id as string);
       refreshDomains();
@@ -206,7 +204,7 @@ export const CategoryAndDomainView: React.FC<CategoryAndDomainViewProps> = ({
       onToast(
         checked ? 'success' : 'info',
         checked ? '已加入专家组' : '已移出专家组',
-        `「${skill.name}」${checked ? '已加入' : '已移出'}「${getExpertDomainMeta(domainId as ExpertDomain)?.name || domainId}」`
+        `「${skill.name}」${checked ? '已加入' : '已移出'}「${getExpertDomainMeta(domainId as ExpertDomain, domainOptions)?.name || domainId}」`
       );
     } catch (err) {
       // 失败回滚
@@ -291,10 +289,10 @@ export const CategoryAndDomainView: React.FC<CategoryAndDomainViewProps> = ({
     }
   };
 
-  const handleDeleteCategory = async (cat: SkillCategoryItem) => {
-    if (!window.confirm(`确定删除分类「${cat.label}」吗？\n已归属该分类的技能不受影响，但将不再出现在分类列表中。`)) {
-      return;
-    }
+  /**
+   * 删除分类（已二次确认，由 PopconfirmBubble 触发）
+   */
+  const performDeleteCategory = async (cat: SkillCategoryItem) => {
     try {
       await api.deleteSkillCategory(cat.id);
       setCategories(prev => prev.filter(c => c.id !== cat.id));
@@ -364,7 +362,8 @@ export const CategoryAndDomainView: React.FC<CategoryAndDomainViewProps> = ({
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {domainOptions.map(domain => {
-              const meta = getExpertDomainMeta(domain.id);
+              // 直接用后端返回的 domain（覆盖了最新的 shortLabel/配色），不要再退回静态常量
+              const meta = domain;
               const members = approvedSkills.filter(s => skillInDomain(s, domain.id));
               const isExpanded = expandedDomain === domain.id;
               const isPickerOpen = memberPickerOpen === domain.id;
@@ -406,13 +405,31 @@ export const CategoryAndDomainView: React.FC<CategoryAndDomainViewProps> = ({
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
-                    <button
-                      onClick={() => handleDeleteDomain(domain)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                      title="删除专家组"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {(() => {
+                      const memberCount = approvedSkills.filter(s => (s.expertDomains || []).includes(domain.id as string)).length;
+                      return (
+                        <PopconfirmBubble
+                          title={`确定删除专家组「${domain.name}」？`}
+                          description={memberCount > 0
+                            ? `当前有 ${memberCount} 个技能归属于该专家组，删除后这些技能的该归属将被一并移除。`
+                            : '删除后不可恢复。'}
+                          type="danger"
+                          confirmText="确认删除"
+                          cancelText="取消"
+                          placement="top-left"
+                          onConfirm={() => performDeleteDomain(domain)}
+                          trigger={({ onClick }) => (
+                            <button
+                              onClick={onClick}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                              title="删除专家组"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        />
+                      );
+                    })()}
                   </div>
                   </div>
 
@@ -606,13 +623,24 @@ export const CategoryAndDomainView: React.FC<CategoryAndDomainViewProps> = ({
                   >
                     <Pencil className="w-4 h-4" />
                   </button>
-                  <button
-                    onClick={() => handleDeleteCategory(cat)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                    title="删除"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <PopconfirmBubble
+                    title={`确定删除分类「${cat.label}」？`}
+                    description="已归属该分类的技能不受影响，但将不再出现在分类列表中。"
+                    type="danger"
+                    confirmText="确认删除"
+                    cancelText="取消"
+                    placement="top-left"
+                    onConfirm={() => performDeleteCategory(cat)}
+                    trigger={({ onClick }) => (
+                      <button
+                        onClick={onClick}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                        title="删除"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  />
                 </div>
               ))}
             </div>

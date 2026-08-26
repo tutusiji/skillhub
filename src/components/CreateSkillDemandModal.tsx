@@ -14,7 +14,7 @@ import {
   Clock
 } from 'lucide-react';
 import { ExpertDomain, SkillDemand, UserAccount } from '../types';
-import { EXPERT_DOMAINS } from '../data/expertDomains';
+import { useExpertDomains } from '../hooks/useExpertDomains';
 
 interface CreateSkillDemandModalProps {
   isOpen: boolean;
@@ -135,7 +135,8 @@ export const CreateSkillDemandModal: React.FC<CreateSkillDemandModalProps> = ({
     }
   };
 
-  const domainOptions = EXPERT_DOMAINS.filter(d => d.id !== 'all');
+  const { domains: backendDomains } = useExpertDomains();
+  const domainOptions = backendDomains;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">

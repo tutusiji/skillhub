@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import { SkillDemand, UserAccount, SkillItem } from '../types';
 import { getExpertDomainMeta } from '../data/expertDomains';
+import { useExpertDomains } from '../hooks/useExpertDomains';
+import { PopconfirmBubble } from './PopconfirmBubble';
 
 interface SkillDemandDetailModalProps {
   demand: SkillDemand | null;
@@ -54,10 +56,12 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
   const [solutionNote, setSolutionNote] = useState('');
   const [selectedSkillId, setSelectedSkillId] = useState<string>('');
   const [showRespondBox, setShowRespondBox] = useState(false);
+  // 走 hook，让详情模态的徽章名称也跟随后端修改
+  const { domains: expertDomains } = useExpertDomains();
 
   if (!isOpen || !demand) return null;
 
-  const domainMeta = getExpertDomainMeta(demand.targetDomain);
+  const domainMeta = getExpertDomainMeta(demand.targetDomain, expertDomains);
   const isSuperAdmin = currentUser?.role === 'super_admin';
   const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
   const isAuthor = currentUser?.id === demand.author.id;
@@ -90,28 +94,19 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
   };
 
   const handleDelete = () => {
-    if (window.confirm('确定要删除此技能需求吗？如果是发布者删除，冻结的奖励积分将退回。')) {
-      if (onDeleteDemand) {
-        onDeleteDemand(demand.id);
-        onClose();
-      }
+    if (onDeleteDemand) {
+      onDeleteDemand(demand.id);
+      onClose();
     }
   };
 
   /**
    * 采纳指定方案，二次确认后由后端发放悬赏积分
    * @param candidateId 方案 ID
-   * @param submitterName 方案提交者姓名，用于确认文案
    */
-  const handleAccept = (candidateId: string, submitterName: string) => {
+  const handleAccept = (candidateId: string) => {
     if (!onAcceptCandidate) return;
-    if (
-      window.confirm(
-        `确认采纳 ${submitterName} 的方案吗？\n\n${demand.bountyPoints} 悬赏积分将发放给该开发者，需求随即标记为已完结，此操作不可撤销。`
-      )
-    ) {
-      onAcceptCandidate(demand.id, candidateId);
-    }
+    onAcceptCandidate(demand.id, candidateId);
   };
 
   const handleRespond = (e: React.FormEvent) => {
@@ -365,14 +360,25 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
 
                     {/* 仅需求发布者/管理员可在未完结时验收方案 */}
                     {canAcceptCandidates && candidate.status === 'pending' && (
-                      <button
-                        onClick={() => handleAccept(candidate.id, candidate.submitterName)}
-                        className="ml-auto px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
-                        title={`采纳该方案并发放 ${demand.bountyPoints} 积分`}
-                      >
-                        <Coins className="w-3.5 h-3.5" />
-                        <span>采纳并发放积分</span>
-                      </button>
+                      <PopconfirmBubble
+                        title={`确认采纳 ${candidate.submitterName} 的方案？`}
+                        description={`${demand.bountyPoints} 悬赏积分将发放给该开发者，需求随即标记为已完结，此操作不可撤销。`}
+                        type="warning"
+                        confirmText="确认采纳"
+                        cancelText="再看看"
+                        placement="top-right"
+                        onConfirm={() => handleAccept(candidate.id)}
+                        trigger={({ onClick }) => (
+                          <button
+                            onClick={onClick}
+                            className="ml-auto px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+                            title={`采纳该方案并发放 ${demand.bountyPoints} 积分`}
+                          >
+                            <Coins className="w-3.5 h-3.5" />
+                            <span>采纳并发放积分</span>
+                          </button>
+                        )}
+                      />
                     )}
                   </div>
 
@@ -431,13 +437,26 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
           <div>
             {/* Delete button for author or admin */}
             {(isAuthor || isAdmin) && (
-              <button
-                onClick={handleDelete}
-                className="px-3.5 py-2 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 transition-colors flex items-center gap-1.5"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>{isAuthor ? '撤销并退回积分' : '管理员删除'}</span>
-              </button>
+              <PopconfirmBubble
+                title="确定要删除此技能需求吗？"
+                description={isAuthor
+                  ? '您是发布者，删除后冻结的悬赏积分将退回您的账户，此操作不可撤销。'
+                  : '管理员删除：发布者的冻结积分将退回原账户，此操作不可撤销。'}
+                type="danger"
+                confirmText="确认删除"
+                cancelText="取消"
+                placement="top-right"
+                onConfirm={handleDelete}
+                trigger={({ onClick }) => (
+                  <button
+                    onClick={onClick}
+                    className="px-3.5 py-2 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 transition-colors flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{isAuthor ? '撤销并退回积分' : '管理员删除'}</span>
+                  </button>
+                )}
+              />
             )}
           </div>
 

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 import {
   Search,
   Terminal,
@@ -113,7 +114,11 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<'all' | SkillCategory>('all');
   const [selectedClients, setSelectedClients] = useState<ClientPlatform[]>([]);
   const [sortBy, setSortBy] = useState<'popular' | 'stars' | 'newest' | 'score'>('popular');
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid'); // Default to Card view
+  const [viewMode, setViewMode] = useLocalStorage<'grid' | 'table'>(
+    'skillhub_view_mode_market',
+    'grid',
+    (v): v is 'grid' | 'table' => v === 'grid' || v === 'table',
+  ); // Default to Card view; 持久化用户偏好
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // 分类标签：后端为数据源（管理员可管理），离线时用常量兜底
@@ -298,7 +303,7 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {featuredSkills.map((skill, index) => {
-            const domainMeta = getExpertDomainMeta(skill.expertDomain);
+            const domainMeta = getExpertDomainMeta(skill.expertDomain, expertDomains);
             return (
               <div
                 key={skill.id}
@@ -438,10 +443,10 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
               <button
                 onClick={() => setViewMode('grid')}
                 id="btn-view-mode-grid"
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${
                   viewMode === 'grid'
-                    ? 'bg-white text-indigo-700 shadow-sm border border-slate-200/60'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white text-indigo-700 shadow-sm border-slate-200/60'
+                    : 'text-slate-600 hover:text-slate-900 border-transparent'
                 }`}
                 title="卡片网格视图（默认）"
               >
@@ -451,10 +456,10 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
               <button
                 onClick={() => setViewMode('table')}
                 id="btn-view-mode-table"
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${
                   viewMode === 'table'
-                    ? 'bg-white text-indigo-700 shadow-sm border border-slate-200/60'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white text-indigo-700 shadow-sm border-slate-200/60'
+                    : 'text-slate-600 hover:text-slate-900 border-transparent'
                 }`}
                 title="紧凑表格列表视图"
               >
@@ -473,10 +478,10 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
               <button
                 key={cat.id}
                 onClick={() => setSelectedCategory(cat.id as any)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all border focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 ${
                   isActive
-                    ? 'bg-slate-900 text-white shadow-sm'
-                    : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 shadow-2xs'
+                    ? 'bg-slate-900 text-white shadow-sm border-transparent'
+                    : 'bg-white text-slate-600 hover:text-slate-900 border-slate-200 hover:bg-slate-50 shadow-2xs'
                 }`}
               >
                 {cat.label}
@@ -636,7 +641,7 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredSkills.map(skill => {
-                    const domainMeta = getExpertDomainMeta(skill.expertDomain);
+                    const domainMeta = getExpertDomainMeta(skill.expertDomain, expertDomains);
                     return (
                       <tr 
                         key={skill.id}
