@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { 
+import React, { useState, useEffect, useCallback } from 'react';
+import {
   ShieldCheck, 
   ShieldAlert, 
   Sparkles, 
@@ -26,6 +26,7 @@ import { executeDualEngineAudit } from '../utils/auditRunner';
 import { AuditReportInspector } from './AuditReportInspector';
 import { FileTreeViewer } from './FileTreeViewer';
 import { PopconfirmBubble } from './PopconfirmBubble';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 interface AuditManagementViewProps {
   currentUser: UserAccount;
@@ -66,6 +67,14 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
 
   // Inspector modal tab
   const [modalTab, setModalTab] = useState<'audit' | 'files' | 'readme'>('audit');
+
+  // ESC 关闭审核详情弹层：弹层打开时监听键盘
+  const closeInspector = useCallback(() => {
+    setInspectingSkill(null);
+    setShowRejectInput(false);
+    setModalTab('audit');
+  }, []);
+  useEscapeKey(closeInspector, inspectingSkill !== null);
 
   const filteredSkills = skills.filter(skill => {
     if (filterStatus === 'pending' && skill.status !== 'pending') return false;

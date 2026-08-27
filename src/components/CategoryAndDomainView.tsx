@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Users,
   Tags,
@@ -18,6 +18,7 @@ import { ExpertDomain, ExpertDomainInfo, SkillCategoryItem, SkillItem, UserAccou
 import { getExpertDomainMeta } from '../data/expertDomains';
 import { api, ExpertDomainPayload } from '../services/api';
 import { useExpertDomains } from '../hooks/useExpertDomains';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { PopconfirmBubble } from './PopconfirmBubble';
 
 interface CategoryAndDomainViewProps {
@@ -84,6 +85,12 @@ export const CategoryAndDomainView: React.FC<CategoryAndDomainViewProps> = ({
     id: '', name: '', shortLabel: '', description: '',
     iconName: 'Layers', badgeBg: 'bg-indigo-50', badgeText: 'text-indigo-700', badgeBorder: 'border-indigo-200', sortOrder: 0,
   });
+
+  // ESC 关闭专家组表单弹层
+  const closeDomainForm = useCallback(() => {
+    setDomainFormOpen(false);
+  }, []);
+  useEscapeKey(closeDomainForm, domainFormOpen);
 
   // —— 标签管理状态 ——
   const [categories, setCategories] = useState<SkillCategoryItem[]>([]);
