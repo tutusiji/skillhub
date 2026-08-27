@@ -224,9 +224,10 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
     if (onDeleteSkill) {
       onDeleteSkill(skill.id);
     }
+    // 删除后关闭审核工作台：走统一的 closeInspector，
+    // 这样 showRejectInput / modalTab 也会被清掉，避免状态泄漏到下一次打开。
     if (inspectingSkill && inspectingSkill.id === skill.id) {
-      setInspectingSkill(null);
-      setDetailLoadingId(null);
+      closeInspector();
     }
     onToast('info', '插件已删除', `已彻底移除插件《${skill.name}》`);
   };
@@ -523,8 +524,14 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
 
       {/* Review & Inspection Modal Workspace */}
       {inspectingSkill && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/75 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-200">
-          <div className="relative w-full max-w-5xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col h-[min(820px,92vh)]">
+        <div
+          onClick={closeInspector}
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/75 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-200"
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="relative w-full max-w-5xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col h-[min(820px,92vh)]"
+          >
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
               <div className="space-y-1">
