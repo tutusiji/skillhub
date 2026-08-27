@@ -1,19 +1,19 @@
-import React, { useState } from 'react';
-import { 
-  ShieldCheck, 
-  ShieldAlert, 
-  Sparkles, 
-  Clock, 
-  CheckCircle2, 
-  XCircle, 
-  AlertTriangle, 
-  Loader2, 
-  Search, 
-  Filter, 
-  Eye, 
-  Check, 
-  X, 
-  Layers, 
+import React, { useEffect, useState } from 'react';
+import {
+  ShieldCheck,
+  ShieldAlert,
+  Sparkles,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  Loader2,
+  Search,
+  Filter,
+  Eye,
+  Check,
+  X,
+  Layers,
   FileText,
   ArrowDownCircle,
   ArrowUpCircle,
@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { AuditExecutionSummary, AuditRule, DeepSeekConfig, SkillItem, UserAccount } from '../types';
 import { executeDualEngineAudit } from '../utils/auditRunner';
+import { api, mapApiSkill } from '../services/api';
 import { AuditReportInspector } from './AuditReportInspector';
 import { FileTreeViewer } from './FileTreeViewer';
 import { PopconfirmBubble } from './PopconfirmBubble';
@@ -66,6 +67,53 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
 
   // Inspector modal tab
   const [modalTab, setModalTab] = useState<'audit' | 'files' | 'readme'>('audit');
+
+  /**
+   * 详情补全状态：列表接口 (LIST_SKILL_COLUMNS) 显式不返回 fileTree，
+   * 审核工作台需要源码预览，必须按需请求 /api/v1/skills/:slug 详情接口。
+   * 用 id 记录正在补全的技能，避免并发切换时把上一次响应回写到当前技能。
+   */
+  const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
+
+  // 打开审核工作台时，如果 fileTree 没内容，主动拉一次详情补全
+  useEffect(() => {
+    if (!inspectingSkill) return;
+    const hasContent = (inspectingSkill.fileTree || []).some(
+      (n) => n.content || (n.children && n.children.some((c) => c.content))
+    );
+    if (hasContent) return;
+    const skillId = inspectingSkill.id;
+    const slugOrId = inspectingSkill.slug || inspectingSkill.id;
+    let cancelled = false;
+    setDetailLoadingId(skillId);
+    api
+      .getSkill(slugOrId)
+      .then((detail) => {
+        if (cancelled) return;
+        const full = mapApiSkill(detail);
+        setInspectingSkill((prev) =>
+          prev && prev.id === skillId
+            ? {
+                ...prev,
+                fileTree: full.fileTree,
+                readme: full.readme || prev.readme,
+                installCommands: full.installCommands || prev.installCommands,
+              }
+            : prev
+        );
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn('拉取审核工作台详情失败:', err);
+        onToast('warning', '源码加载失败', '后端详情接口异常，源码树暂不可预览（不影响其他审核操作）');
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoadingId((cur) => (cur === skillId ? null : cur));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [inspectingSkill?.id]);
 
   const filteredSkills = skills.filter(skill => {
     if (filterStatus === 'pending' && skill.status !== 'pending') return false;
@@ -168,6 +216,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
     }
     if (inspectingSkill && inspectingSkill.id === skill.id) {
       setInspectingSkill(null);
+      setDetailLoadingId(null);
     }
     onToast('info', '插件已删除', `已彻底移除插件《${skill.name}》`);
   };
@@ -465,7 +514,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
       {/* Review & Inspection Modal Workspace */}
       {inspectingSkill && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/75 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-200">
-          <div className="relative w-full max-w-5xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+          <div className="relative w-full max-w-5xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col h-[min(820px,92vh)]">
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
               <div className="space-y-1">
@@ -483,7 +532,10 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
               </div>
 
               <button
-                onClick={() => setInspectingSkill(null)}
+                onClick={() => {
+                  setInspectingSkill(null);
+                  setDetailLoadingId(null);
+                }}
                 className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100"
               >
                 <X className="w-5 h-5" />
@@ -530,7 +582,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
             </div>
 
             {/* Modal Content */}
-            <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50">
+            <div className="p-6 overflow-y-auto flex-1 min-h-0 bg-slate-50/50">
               {modalTab === 'audit' && (
                 <AuditReportInspector
                   summary={inspectingSkill.auditResults}
@@ -542,10 +594,30 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
 
               {modalTab === 'files' && (
                 <div className="space-y-3">
-                  <div className="text-xs text-slate-500 font-semibold">
-                    正在核验提交的 ZIP 源码包结构：
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs text-slate-500 font-semibold">
+                      正在核验提交的 ZIP 源码包结构：
+                    </div>
+                    {detailLoadingId === inspectingSkill.id && (
+                      <span className="inline-flex items-center gap-1.5 text-[11px] text-indigo-700 font-semibold">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>正在补全源码...</span>
+                      </span>
+                    )}
                   </div>
-                  <FileTreeViewer tree={inspectingSkill.fileTree} />
+                  {inspectingSkill.fileTree.length === 0 ? (
+                    detailLoadingId === inspectingSkill.id ? (
+                      <div className="h-[460px] flex items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white text-xs text-slate-500">
+                        正在从后端详情接口拉取文件树，请稍候...
+                      </div>
+                    ) : (
+                      <div className="h-[460px] flex items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white text-xs text-slate-500">
+                        该技能未提供源码文件树（可能上传时未解析 ZIP）
+                      </div>
+                    )
+                  ) : (
+                    <FileTreeViewer tree={inspectingSkill.fileTree} />
+                  )}
                 </div>
               )}
 
