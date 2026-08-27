@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -27,6 +27,7 @@ import { api, mapApiSkill } from '../services/api';
 import { AuditReportInspector } from './AuditReportInspector';
 import { FileTreeViewer } from './FileTreeViewer';
 import { PopconfirmBubble } from './PopconfirmBubble';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 interface AuditManagementViewProps {
   currentUser: UserAccount;
@@ -114,6 +115,15 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
       cancelled = true;
     };
   }, [inspectingSkill?.id]);
+
+  // ESC 关闭审核详情弹层：弹层打开时监听键盘
+  const closeInspector = useCallback(() => {
+    setInspectingSkill(null);
+    setDetailLoadingId(null);
+    setShowRejectInput(false);
+    setModalTab('audit');
+  }, []);
+  useEscapeKey(closeInspector, inspectingSkill !== null);
 
   const filteredSkills = skills.filter(skill => {
     if (filterStatus === 'pending' && skill.status !== 'pending') return false;
@@ -532,10 +542,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
               </div>
 
               <button
-                onClick={() => {
-                  setInspectingSkill(null);
-                  setDetailLoadingId(null);
-                }}
+                onClick={closeInspector}
                 className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100"
               >
                 <X className="w-5 h-5" />
