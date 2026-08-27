@@ -452,27 +452,34 @@ export default function App() {
   };
 
   // Navigate to Skill Detail Page
-  const handleOpenSkillDetail = (skill: SkillItem) => {
+  const handleOpenSkillDetail = async (skill: SkillItem) => {
     if (currentTab !== 'detail') {
       setPreviousTab(currentTab as NavigationTab);
     }
-    navigate('detail', skill);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
 
     // 业务数据全部以数据库为准，文件源码内容无需本地持久化；
-    // 在线时从后端详情接口补全，保证详情页源码预览可用
-    const hasContent = (skill.fileTree || []).some(n => n.content);
-    if (!hasContent && skill.slug) {
-      api
-        .getSkill(skill.slug)
-        .then(detail => {
-          const full = mapApiSkill(detail);
-          setSkills(prev => prev.map(s => (s.id === skill.id ? full : s)));
-          setSelectedSkill(full);
-        })
-        .catch(() => {
-          /* 离线或后端不可用时保留本地精简数据 */
-        });
+    // 列表接口已剔除 fileTree（响应体 27.7MB → 37.5KB），
+    // 若本地没有源码，先从详情接口拉全量再打开，避免首屏代码树空白闪烁
+    const hasContent = (skill.fileTree || []).some(n => !!n.content);
+    if (hasContent) {
+      navigate('detail', skill);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    setDetailLoading(true);
+    try {
+      const detail = await api.getSkill(skill.slug);
+      const full = mapApiSkill(detail);
+      setSkills(prev => prev.map(s => (s.id === skill.id ? full : s)));
+      navigate('detail', full);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      // 离线/后端不可用时退而求其次：用列表精简数据打开，至少元信息可看
+      navigate('detail', skill);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } finally {
+      setDetailLoading(false);
     }
   };
 
