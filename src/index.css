@@ -1,1 +1,80 @@
 @import "tailwindcss";
+
+/**
+ * 全局滚动条样式
+ *
+ * 目标：替掉各系统默认的宽灰滚动条，统一成与 slate/indigo 主题一致的细圆角样式。
+ * 兼容两套标准：
+ *   - Firefox：`scrollbar-width` / `scrollbar-color`（只能细/粗 + 两个颜色，不支持 hover）
+ *   - Chromium / Safari：`::-webkit-scrollbar-*` 伪元素（可做圆角、hover 变深、透明轨道）
+ * 两者同时写，谁认哪套各取所需。
+ */
+
+/* —— Firefox —— */
+html {
+  scrollbar-width: thin;
+  /* thumb 色 / track 色，对应 slate-300 与 transparent */
+  scrollbar-color: rgb(203 213 225) transparent;
+}
+
+/* —— Chromium / Safari —— */
+/* 纵向 10px、横向 10px：比默认(约 15px)明显收窄，但仍留足可点击宽度 */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+/* 轨道透明，让滚动条浮在内容背景上，不再是一条突兀的灰槽 */
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/*
+ * thumb：slate-300 半透明 + 全圆角。
+ * 关键是 `border: 2px solid transparent` + `background-clip: padding-box`：
+ * 这样视觉上的 thumb 只有 6px 宽，两侧 2px 透明边充当内缩留白，
+ * 比直接写 6px 宽度更好 —— 可点击热区仍是完整的 10px。
+ */
+*::-webkit-scrollbar-thumb {
+  background-color: rgb(203 213 225 / 0.9);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(148 163 184 / 0.95);
+}
+
+*::-webkit-scrollbar-thumb:active {
+  background-color: rgb(100 116 139 / 0.95);
+}
+
+/* 纵横交汇的小方块，默认会是一块灰色补丁，这里抹掉 */
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/**
+ * `.no-scrollbar` —— 完全隐藏滚动条但保留滚动能力。
+ * 用于横向标签条这类「靠拖拽/滑动浏览、不需要滚动条」的场景
+ * （MarketplaceView 的分类条、SkillDemandMarketView 的筛选条已在用）。
+ */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/**
+ * 尊重系统「减少动态效果」偏好：关掉平滑滚动与各类动画过渡。
+ */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
