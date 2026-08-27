@@ -20,6 +20,12 @@ interface FileTreeViewerProps {
   tree: FileTreeNode[];
   defaultSelectedPath?: string;
   onCopyFile?: (filename: string, content: string) => void;
+  /**
+   * 外壳高度类，默认固定 460px（详情页这种「页面内嵌一块」的场景合适）。
+   * 弹窗里应传 'h-full'，让本组件填满父级已经限高的容器 —— 否则组件自己的
+   * 460px 高度会和弹窗内容区各滚一套，出现双滚动条。
+   */
+  heightClassName?: string;
 }
 
 function getFileIcon(filename: string) {
@@ -51,7 +57,12 @@ function findFirstFile(nodes: FileTreeNode[]): FileTreeNode | null {
   return null;
 }
 
-export const FileTreeViewer: React.FC<FileTreeViewerProps> = ({ tree, defaultSelectedPath, onCopyFile }) => {
+export const FileTreeViewer: React.FC<FileTreeViewerProps> = ({
+  tree,
+  defaultSelectedPath,
+  onCopyFile,
+  heightClassName = 'h-[460px]',
+}) => {
   const [selectedFile, setSelectedFile] = useState<FileTreeNode | null>(() => {
     if (defaultSelectedPath) {
       const findByPath = (nodes: FileTreeNode[]): FileTreeNode | null => {
@@ -157,9 +168,11 @@ export const FileTreeViewer: React.FC<FileTreeViewerProps> = ({ tree, defaultSel
   const lines = selectedFile?.content ? selectedFile.content.split('\n') : [];
 
   return (
-    <div className="border border-slate-200 rounded-3xl overflow-hidden bg-white shadow-sm flex flex-col md:flex-row h-[460px]">
+    <div
+      className={`border border-slate-200 rounded-3xl overflow-hidden bg-white shadow-sm flex flex-col md:flex-row min-h-0 ${heightClassName}`}
+    >
       {/* File Tree Sidebar */}
-      <div className="w-full md:w-64 border-b md:border-b-0 md:border-r border-slate-200 bg-slate-50/80 p-3.5 overflow-y-auto flex flex-col shrink-0">
+      <div className="w-full md:w-64 md:h-auto max-h-52 md:max-h-none border-b md:border-b-0 md:border-r border-slate-200 bg-slate-50/80 p-3.5 overflow-y-auto flex flex-col shrink-0 min-h-0">
         <div className="flex items-center justify-between px-2 pb-2 mb-2 border-b border-slate-200">
           <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
             <Layers className="w-3.5 h-3.5 text-indigo-600" />

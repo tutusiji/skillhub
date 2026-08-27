@@ -597,22 +597,30 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
               </button>
             </div>
 
-            {/* Modal Content */}
-            <div className="p-6 overflow-y-auto flex-1 min-h-0 bg-slate-50/50">
+            {/*
+              Modal Content
+              files tab 由 FileTreeViewer 自己撑满并在内部滚动（overflow-hidden，
+              避免和组件内部的滚动条叠成双滚动）；其余 tab 是普通长文档，外层滚动。
+            */}
+            <div
+              className={`p-6 flex-1 min-h-0 bg-slate-50/50 ${
+                modalTab === 'files' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'
+              }`}
+            >
               {modalTab === 'readme' &&
                 (inspectingSkill.readme?.trim() ? (
                   <div className="p-6 rounded-2xl bg-white border border-slate-200 text-xs sm:text-sm whitespace-pre-wrap leading-relaxed text-slate-800">
                     {inspectingSkill.readme}
                   </div>
                 ) : (
-                  <div className="h-[460px] flex items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white text-xs text-slate-500">
+                  <div className="min-h-[320px] h-full flex items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white text-xs text-slate-500 text-center px-6">
                     该技能未提供使用文档（README），可切到「ZIP 包源码与目录树」直接看源码
                   </div>
                 ))}
 
               {modalTab === 'files' && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
+                <div className="flex flex-col min-h-0 flex-1 gap-3">
+                  <div className="flex items-center justify-between shrink-0">
                     <div className="text-xs text-slate-500 font-semibold">
                       正在核验提交的 ZIP 源码包结构：
                     </div>
@@ -625,16 +633,20 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
                   </div>
                   {inspectingSkill.fileTree.length === 0 ? (
                     detailLoadingId === inspectingSkill.id ? (
-                      <div className="h-[460px] flex items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white text-xs text-slate-500">
+                      <div className="flex-1 min-h-0 flex items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white text-xs text-slate-500">
                         正在从后端详情接口拉取文件树，请稍候...
                       </div>
                     ) : (
-                      <div className="h-[460px] flex items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white text-xs text-slate-500">
+                      <div className="flex-1 min-h-0 flex items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white text-xs text-slate-500">
                         该技能未提供源码文件树（可能上传时未解析 ZIP）
                       </div>
                     )
                   ) : (
-                    <FileTreeViewer tree={inspectingSkill.fileTree} />
+                    /* flex-1 min-h-0：吃掉标题行之外的全部剩余高度，替掉组件默认的 460px 固定高 */
+                    <FileTreeViewer
+                      tree={inspectingSkill.fileTree}
+                      heightClassName="flex-1 min-h-0"
+                    />
                   )}
                 </div>
               )}
