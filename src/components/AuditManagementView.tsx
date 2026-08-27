@@ -599,14 +599,16 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
 
             {/* Modal Content */}
             <div className="p-6 overflow-y-auto flex-1 min-h-0 bg-slate-50/50">
-              {modalTab === 'audit' && (
-                <AuditReportInspector
-                  summary={inspectingSkill.auditResults}
-                  onReScan={() => handleRunScan(inspectingSkill)}
-                  isScanning={isScanningId === inspectingSkill.id}
-                  onViewFileInTree={() => setModalTab('files')}
-                />
-              )}
+              {modalTab === 'readme' &&
+                (inspectingSkill.readme?.trim() ? (
+                  <div className="p-6 rounded-2xl bg-white border border-slate-200 text-xs sm:text-sm whitespace-pre-wrap leading-relaxed text-slate-800">
+                    {inspectingSkill.readme}
+                  </div>
+                ) : (
+                  <div className="h-[460px] flex items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white text-xs text-slate-500">
+                    该技能未提供使用文档（README），可切到「ZIP 包源码与目录树」直接看源码
+                  </div>
+                ))}
 
               {modalTab === 'files' && (
                 <div className="space-y-3">
@@ -637,10 +639,13 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
                 </div>
               )}
 
-              {modalTab === 'readme' && (
-                <div className="p-6 rounded-2xl bg-white border border-slate-200 text-xs sm:text-sm whitespace-pre-wrap leading-relaxed text-slate-800">
-                  {inspectingSkill.readme}
-                </div>
+              {modalTab === 'audit' && (
+                <AuditReportInspector
+                  summary={inspectingSkill.auditResults}
+                  onReScan={() => handleRunScan(inspectingSkill)}
+                  isScanning={isScanningId === inspectingSkill.id}
+                  onViewFileInTree={() => setModalTab('files')}
+                />
               )}
             </div>
 
