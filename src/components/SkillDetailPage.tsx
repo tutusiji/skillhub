@@ -492,7 +492,7 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
                   <p className="text-xs font-bold text-amber-900">
                     步骤 1 · 首次接入需先注册企业插件市场（仅需执行一次）
                   </p>
-                  <div className="relative rounded-xl bg-slate-950 text-slate-100 p-3 font-mono text-[11px] sm:text-xs overflow-x-auto flex items-center justify-between gap-3 border border-slate-800">
+                  <div className="scrollbar-on-dark relative rounded-xl bg-slate-950 text-slate-100 p-3 font-mono text-[11px] sm:text-xs overflow-x-auto flex items-center justify-between gap-3 border border-slate-800">
                     <span className="text-emerald-400 select-none font-bold">$</span>
                     <span className="flex-1 font-mono text-slate-200 whitespace-nowrap">
                       {marketplaceAddCommand}
@@ -514,7 +514,7 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
                     <p className="text-xs font-bold text-amber-900">
                       市场仓库升级 · 新插件发布后执行一次即可同步
                     </p>
-                    <div className="relative rounded-xl bg-slate-950 text-slate-100 p-3 font-mono text-[11px] sm:text-xs overflow-x-auto flex items-center justify-between gap-3 border border-slate-800 mt-2">
+                    <div className="scrollbar-on-dark relative rounded-xl bg-slate-950 text-slate-100 p-3 font-mono text-[11px] sm:text-xs overflow-x-auto flex items-center justify-between gap-3 border border-slate-800 mt-2">
                       <span className="text-emerald-400 select-none font-bold">$</span>
                       <span className="flex-1 font-mono text-slate-200 whitespace-nowrap">
                         {marketplaceUpdateCommand}
@@ -536,7 +536,7 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
               )}
 
               {/* Command box */}
-              <div className="relative rounded-2xl bg-slate-950 text-slate-100 p-4 font-mono text-xs sm:text-sm overflow-x-auto flex items-center justify-between gap-3 border border-slate-800 shadow-md">
+              <div className="scrollbar-on-dark relative rounded-2xl bg-slate-950 text-slate-100 p-4 font-mono text-xs sm:text-sm overflow-x-auto flex items-center justify-between gap-3 border border-slate-800 shadow-md">
                 <span className="text-emerald-400 select-none font-bold">$</span>
                 <span className="flex-1 font-mono text-slate-200">{currentCommand}</span>
                 <button

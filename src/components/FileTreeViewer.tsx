@@ -188,7 +188,7 @@ export const FileTreeViewer: React.FC<FileTreeViewerProps> = ({
       </div>
 
       {/* Code / Content Viewer */}
-      <div className="flex-1 flex flex-col min-w-0 bg-slate-950 text-slate-200 overflow-hidden font-mono">
+      <div className="scrollbar-on-dark flex-1 flex flex-col min-w-0 bg-slate-950 text-slate-200 overflow-hidden font-mono">
         {selectedFile ? (
           <>
             {/* Header */}

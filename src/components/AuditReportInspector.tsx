@@ -315,7 +315,7 @@ export const AuditReportInspector: React.FC<AuditReportInspectorProps> = ({
                           </button>
                         )}
                       </div>
-                      <div className="p-3 rounded-xl bg-slate-900 text-rose-300 font-mono text-xs overflow-x-auto border border-rose-900/60 shadow-inner">
+                      <div className="scrollbar-on-dark p-3 rounded-xl bg-slate-900 text-rose-300 font-mono text-xs overflow-x-auto border border-rose-900/60 shadow-inner">
                         <code>{item.details.detectedSnippet}</code>
                       </div>
                     </div>

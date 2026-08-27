@@ -3,62 +3,98 @@
 /**
  * 全局滚动条样式
  *
- * 目标：替掉各系统默认的宽灰滚动条，统一成与 slate/indigo 主题一致的细圆角样式。
+ * 统一成「细 + 圆角 + 半透明」的悬浮条：轨道完全透明，thumb 用半透明
+ * slate 叠在内容背景上，hover / active 逐级加深。
+ *
+ * 颜色走 CSS 变量，方便深色区域（代码预览、终端块）就近覆盖 —— 见文件末尾
+ * 的 `.scrollbar-on-dark`。半透明的另一个好处是同一套颜色在浅灰、纯白、
+ * 浅色渐变背景上都不会显脏。
+ *
  * 兼容两套标准：
- *   - Firefox：`scrollbar-width` / `scrollbar-color`（只能细/粗 + 两个颜色，不支持 hover）
- *   - Chromium / Safari：`::-webkit-scrollbar-*` 伪元素（可做圆角、hover 变深、透明轨道）
- * 两者同时写，谁认哪套各取所需。
+ *   - Firefox：`scrollbar-width` / `scrollbar-color`（只有细/粗 + 两个颜色，
+ *     不支持 hover 态，取常态色）
+ *   - Chromium / Safari：`::-webkit-scrollbar-*` 伪元素（圆角、hover、透明轨道）
  */
+:root {
+  /* 浅色背景上的滚动条：slate-500 系，低透明度 */
+  --scrollbar-thumb: rgb(100 116 139 / 0.3);
+  --scrollbar-thumb-hover: rgb(71 85 105 / 0.5);
+  --scrollbar-thumb-active: rgb(51 65 85 / 0.68);
+  /* 滚动条总宽（含两侧透明留白），视觉细条约为此值减 4px */
+  --scrollbar-size: 10px;
+}
 
-/* —— Firefox —— */
+/* —— Firefox ——
+   写在 `*` 上而不是只写 html：Firefox 的 scrollbar-width/color 不会从
+   根元素继承到内部滚动容器，只设 html 的话弹窗、代码区等内层滚动条仍是
+   系统默认样式。`*` 的优先级最低，`.no-scrollbar` / `.scrollbar-on-dark`
+   仍能正常覆盖。 */
+*,
 html {
   scrollbar-width: thin;
-  /* thumb 色 / track 色，对应 slate-300 与 transparent */
-  scrollbar-color: rgb(203 213 225) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 /* —— Chromium / Safari —— */
-/* 纵向 10px、横向 10px：比默认(约 15px)明显收窄，但仍留足可点击宽度 */
 *::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
 }
 
-/* 轨道透明，让滚动条浮在内容背景上，不再是一条突兀的灰槽 */
-*::-webkit-scrollbar-track {
+/* 轨道全透明，滚动条像浮在内容之上，不再是一条实心灰槽 */
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-track-piece {
   background: transparent;
 }
 
 /*
- * thumb：slate-300 半透明 + 全圆角。
- * 关键是 `border: 2px solid transparent` + `background-clip: padding-box`：
- * 这样视觉上的 thumb 只有 6px 宽，两侧 2px 透明边充当内缩留白，
- * 比直接写 6px 宽度更好 —— 可点击热区仍是完整的 10px。
+ * thumb：全圆角 + 半透明。
+ * `border: 2px solid transparent` 配 `background-clip: padding-box` 做内缩：
+ * 视觉上的条只有 6px，两侧 2px 透明边当留白，但可点击热区仍是完整 10px
+ * —— 比直接把 width 调到 6px 更好按。
  */
 *::-webkit-scrollbar-thumb {
-  background-color: rgb(203 213 225 / 0.9);
+  background-color: var(--scrollbar-thumb);
   border-radius: 9999px;
   border: 2px solid transparent;
   background-clip: padding-box;
+  transition: background-color 0.15s ease-out;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background-color: rgb(148 163 184 / 0.95);
+  background-color: var(--scrollbar-thumb-hover);
 }
 
 *::-webkit-scrollbar-thumb:active {
-  background-color: rgb(100 116 139 / 0.95);
+  background-color: var(--scrollbar-thumb-active);
 }
 
-/* 纵横交汇的小方块，默认会是一块灰色补丁，这里抹掉 */
+/* 纵横滚动条交汇处默认是一块灰补丁，抹掉 */
 *::-webkit-scrollbar-corner {
   background: transparent;
 }
 
+/* 上下/左右两端的箭头按钮（部分平台会渲染），一并去掉 */
+*::-webkit-scrollbar-button {
+  display: none;
+}
+
 /**
- * `.no-scrollbar` —— 完全隐藏滚动条但保留滚动能力。
- * 用于横向标签条这类「靠拖拽/滑动浏览、不需要滚动条」的场景
- * （MarketplaceView 的分类条、SkillDemandMarketView 的筛选条已在用）。
+ * 深色容器内的滚动条 —— 代码预览、终端命令块这类 bg-slate-950/900 区域。
+ * 用浅色半透明 thumb，否则深色底上会出现一条突兀的亮灰条。
+ * 变量在容器上覆盖，容器内所有可滚动子元素自动继承。
+ */
+.scrollbar-on-dark {
+  --scrollbar-thumb: rgb(226 232 240 / 0.22);
+  --scrollbar-thumb-hover: rgb(226 232 240 / 0.38);
+  --scrollbar-thumb-active: rgb(241 245 249 / 0.52);
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/**
+ * `.no-scrollbar` —— 隐藏滚动条但保留滚动能力。
+ * 用于靠拖拽/滑动浏览的横向标签条（MarketplaceView 分类条、
+ * SkillDemandMarketView 筛选条）。
  */
 .no-scrollbar {
   scrollbar-width: none;
@@ -70,11 +106,13 @@ html {
   height: 0;
 }
 
-/**
- * 尊重系统「减少动态效果」偏好：关掉平滑滚动与各类动画过渡。
- */
+/* 尊重系统「减少动态效果」偏好 */
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    transition: none;
   }
 }
