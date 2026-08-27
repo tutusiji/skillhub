@@ -178,14 +178,18 @@ export const Modal: React.FC<ModalProps> = ({
       <div
         ref={panelRef}
         tabIndex={-1}
-        className={`relative w-full ${SIZE_CLASS[size]} bg-white rounded-3xl border border-slate-200 shadow-2xl outline-none transition-all duration-200 ease-out ${
+        className={`relative w-full ${SIZE_CLASS[size]} flex flex-col bg-white rounded-3xl border border-slate-200 shadow-2xl outline-none transition-all duration-200 ease-out ${
           visible ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 translate-y-2'
         } ${panelClassName ?? ''}`}
-        style={{ maxHeight: 'calc(100vh - 4rem)' }}
+        /*
+          顶部对齐时容器自带 pt-10/pt-16，面板得再让出这段距离，
+          否则面板底边正好顶到视口底部，看起来像被裁掉。
+        */
+        style={{ maxHeight: align === 'top' ? 'calc(100vh - 8rem)' : 'calc(100vh - 4rem)' }}
         onClick={e => e.stopPropagation()}
       >
         {header && (
-          <div className="flex items-start justify-between gap-3 p-5 sm:p-6 border-b border-slate-100">
+          <div className="shrink-0 flex items-start justify-between gap-3 p-5 sm:p-6 border-b border-slate-100">
             <div className="min-w-0 flex-1">{header}</div>
             {showCloseButton && (
               <button
@@ -200,13 +204,17 @@ export const Modal: React.FC<ModalProps> = ({
           </div>
         )}
 
-        {/* Content body */}
-        <div className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 12rem)' }}>
+        {/*
+          Content body —— 高度由 flex 分配，不再硬编码 maxHeight。
+          原来固定 calc(100vh - 12rem) 是按「有 header + 有 footer」估的，
+          没传这两个插槽的弹窗会白扣 8rem 高度，内容被挤在一条窄缝里滚动。
+        */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
           {children}
         </div>
 
         {footer && (
-          <div className="px-5 sm:px-6 py-4 border-t border-slate-100 bg-slate-50/50 rounded-b-3xl">
+          <div className="shrink-0 px-5 sm:px-6 py-4 border-t border-slate-100 bg-slate-50/50 rounded-b-3xl">
             {footer}
           </div>
         )}

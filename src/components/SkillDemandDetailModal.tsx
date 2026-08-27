@@ -130,17 +130,23 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
       containerClassName="pt-10 sm:pt-16"
       showCloseButton={false}
     >
-      <div className="bg-white text-left space-y-6">
-        {/* Close button (absolute, top-right) */}
+      {/*
+        内容区自带 padding：Modal 的 body 插槽是无内边距的裸容器，
+        迁移到 Modal 时这层 p-6 sm:p-8 被漏掉了，导致文字全部贴着圆角边框。
+      */}
+      <div className="p-6 sm:p-8 text-left space-y-6">
+        {/* 关闭按钮：绝对定位在面板右上角（Modal 面板是 relative 容器） */}
         <button
           onClick={onClose}
-          className="absolute top-5 right-5 p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors z-10"
+          className="absolute top-4 right-4 p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors z-10"
+          title="关闭"
+          aria-label="关闭"
         >
           <X className="w-5 h-5" />
         </button>
 
-        {/* Top Badges — 留出右上角 X 关闭按钮（right-5 + p-2 + w-5 ≈ 56px）的占位 */}
-        <div className="flex items-center gap-2.5 flex-wrap pr-16">
+        {/* Top Badges —— 右侧留出关闭按钮的位置，积分角标（ml-auto）不会被压住 */}
+        <div className="flex items-center gap-2.5 flex-wrap pr-12">
           <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${domainMeta.badgeBg} ${domainMeta.badgeText} ${domainMeta.badgeBorder || domainMeta.border || 'border-slate-200'}`}>
             {domainMeta.shortLabel} · {domainMeta.name}
           </span>
