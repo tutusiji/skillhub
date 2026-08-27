@@ -139,8 +139,8 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        {/* Top Badges */}
-        <div className="flex items-center gap-2.5 flex-wrap pr-8">
+        {/* Top Badges — 留出右上角 X 关闭按钮（right-5 + p-2 + w-5 ≈ 56px）的占位 */}
+        <div className="flex items-center gap-2.5 flex-wrap pr-16">
           <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${domainMeta.badgeBg} ${domainMeta.badgeText} ${domainMeta.badgeBorder || domainMeta.border || 'border-slate-200'}`}>
             {domainMeta.shortLabel} · {domainMeta.name}
           </span>
