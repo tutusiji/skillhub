@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SkillHub favicon — 与页面顶部的品牌 Logo 视觉一致
+  - 40×40 圆角方形 + 靛蓝→天蓝对角渐变（Tailwind: from-indigo-600 via-indigo-500 to-sky-400）
+  - 居中白色 Lucide Sparkles 图标（4 角星 + 两对短线）
+  - 浏览器标签页 16×16 / 32×32 渲染都清晰（SVG 矢量）
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40" role="img" aria-label="SkillHub">
+  <defs>
+    <!-- 与 Logo 同一组色：top-left 靛蓝 600 → 中段靛蓝 500 → bottom-right 天蓝 400 -->
+    <linearGradient id="brand-gradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4F46E5" />
+      <stop offset="50%" stop-color="#6366F1" />
+      <stop offset="100%" stop-color="#38BDF8" />
+    </linearGradient>
+  </defs>
+
+  <!-- 圆角方形：rx=9 约 22%，与 Logo 的 rounded-2xl 视觉接近但更适合 favicon -->
+  <rect x="0" y="0" width="40" height="40" rx="9" ry="9" fill="url(#brand-gradient)" />
+
+  <!-- Lucide Sparkles 图标（白色描边），从 24×24 居中嵌入 40×40 画布 -->
+  <g transform="translate(8 8)" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- 主四角星：lucide Sparkles 的 4 角星 path，原始坐标就是 24×24 -->
+    <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+    <!-- 右上小星：十字短线 -->
+    <path d="M20 3v4" />
+    <path d="M22 5h-4" />
+    <!-- 左下小星：十字短线 -->
+    <path d="M2 17v2" />
+    <path d="M5 18H3" />
+  </g>
+</svg>
