@@ -72,10 +72,27 @@ pnpm run server:build   # 后端 → server/dist/
 | `DATABASE_URL` | 空 | 设置后优先，自动按 Postgres 连接 |
 | `LLM_BASE_URL` / `LLM_MODEL_NAME` / `LLM_API_KEY` | 空 | 语义审核引擎；留空降级本地启发式 |
 | `IAM_BASE_URL` / `IAM_API_TOKEN` | 空 | 内部 IAM 单点登录；留空走桩 |
-| `JWT_SECRET` | 内置默认 | **生产务必覆盖为强随机值** |
+| `JWT_SECRET` | 无 | JWT 签名密钥。**生产环境（`APP_ENV=prod`）必须显式配置且 ≥32 字符，否则服务拒绝启动** |
+| `JWT_EXPIRES_IN` | `12h` | 令牌有效期 |
+| `CORS_ORIGINS` | 空 | 跨域来源白名单（逗号分隔）。留空时生产仅同源、开发回显来源 |
+| `SEED_DEMO_DATA` | 按环境 | 是否播种演示数据。留空时生产关闭、其他环境开启 |
 
 首次启动自动完成：建表（`synchronize: true`）、播种预置账号/规则/演示数据、
 初始化 Git 市场仓库。无需手工初始化。
+
+### 4.1 生产上线前的安全检查清单
+
+以下几项在开发环境是便利设计，在生产环境是可被直接利用的漏洞，务必逐条确认：
+
+| 项 | 要求 | 未做到的后果 |
+| --- | --- | --- |
+| `JWT_SECRET` | `.env.prod` 中设为 ≥32 字符随机值（`openssl rand -hex 32`） | 源码内置默认密钥是公开的，任何人可自签 `role=super_admin` 令牌，等同全站无鉴权。**已加启动期强校验，配置缺失会直接启动失败** |
+| `SEED_DEMO_DATA` | 保持关闭（生产默认） | 演示员工账号共用弱口令 `Password123!`，等于一组可直接登录的后门账号 |
+| 超管初始密码 | 首次登录后立即修改 `admin` 的初始密码 `skill@2026` | 该初始密码在文档与源码中公开 |
+| `CORS_ORIGINS` | 同源部署时留空；确需独立前端域名时逐个列出 | 早期 `origin:'*' + credentials:true` 允许任意外部站点带受害者令牌调内网 API |
+| `synchronize` | 表结构变更前先备份，或改用显式迁移 | 自动改表在生产可能造成数据丢失 |
+| 反向代理 | 若经 Nginx，需透传 `X-Forwarded-For` | 登录爆破节流与互动计数去重都依赖来源 IP，缺失时按「无来源」宽松处理 |
+| LLM 凭据 | 只写在 `.env.prod`，不入库 | `/audit/llm-config` 已做管理员鉴权且只回传掩码，但环境文件仍须妥善保管 |
 
 ---
 

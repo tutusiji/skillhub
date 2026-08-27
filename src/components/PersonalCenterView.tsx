@@ -32,6 +32,7 @@ import {
 import { SkillItem, UserAccount, SkillDemand } from '../types';
 import { SkillCard } from './SkillCard';
 import { getExpertDomainMeta } from '../data/expertDomains';
+import { isOwnSubmission } from '../utils/skillOwnership';
 import { useExpertDomains } from '../hooks/useExpertDomains';
 import { PopconfirmBubble } from './PopconfirmBubble';
 
@@ -128,9 +129,10 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
   // Derived data
   const starredSkills = allSkills.filter(s => s.isStarred);
   const likedSkills = allSkills.filter(s => s.isLiked);
-  const mySubmissions = allSkills.filter(s => 
-    s.author.name === currentUser.name || s.author.name === 'Alex Chen' || s.author.name === '林晨 (开发架构组)'
-  );
+  // "我的提交"只认当前登录者本人。
+  // 此前这里硬编码了两个演示作者名（'Alex Chen' / '林晨 (开发架构组)'），
+  // 任何用户都会把这些演示技能当成自己的提交，并看到不属于自己的审核状态。
+  const mySubmissions = allSkills.filter(s => isOwnSubmission(s, currentUser));
   
   // My Demands
   const myDemands = allDemands.filter(d => d.author.id === currentUser.id);

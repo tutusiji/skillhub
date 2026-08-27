@@ -3,7 +3,7 @@
  * SkillHub 端到端回归测试脚本
  *
  * 覆盖范围：
- *  1. 认证：注册 / 重复注册 / 弱密码 / 登录 / 错误密码 / /auth/me 回源
+ *  1. 认证：注册 / 重复注册 / 弱密码 / 登录 / 错误密码 / /auth/me 回源 / 爆破节流
  *  2. 技能：上传 / 列表 / 详情 / 审核通过 / 下架 / 重新上架 / 驳回 / 计数 / 删除
  *  3. 中文名技能 slug 派生与重名冲突处理（历史 500 回归点）
  *  4. 悬赏需求：发布扣分 / 应征 / 验收发放 / 驳回退款 / 删除退款 / 余额不足
@@ -247,14 +247,46 @@ async function testSkills() {
   ctx.skillId2 = upload2.body?.id;
   ctx.skillSlug2 = upload2.body?.slug;
 
-  const detail = await req('GET', `/api/v1/skills/${encodeURIComponent(ctx.skillSlug)}`);
+  // 待审核技能只对管理员与提交者本人可见，故详情查询需带提交者令牌
+  const detail = await req('GET', `/api/v1/skills/${encodeURIComponent(ctx.skillSlug)}`, { token: ctx.devToken });
   check('按 slug 查询技能详情', detail.status === 200 && detail.body?.id === ctx.skillId, `status=${detail.status}`);
 
-  const detailById = await req('GET', `/api/v1/skills/${ctx.skillId}`);
+  const detailById = await req('GET', `/api/v1/skills/${ctx.skillId}`, { token: ctx.devToken });
   check('按 ID 查询技能详情', detailById.status === 200 && detailById.body?.id === ctx.skillId, `status=${detailById.status}`);
 
   const missing = await req('GET', '/api/v1/skills/definitely-not-exists-xyz');
   check('查询不存在技能返回 404', missing.status === 404, `status=${missing.status}`);
+
+  // —— 可见性收敛：未上架技能不得对无关方泄露（此前列表与详情都是全量下发）——
+  const anonDetail = await req('GET', `/api/v1/skills/${ctx.skillId}`);
+  check('匿名查询待审核技能详情返回 404', anonDetail.status === 404, `status=${anonDetail.status}`);
+
+  const anonList = await req('GET', '/api/v1/skills');
+  const anonLeak = (anonList.body || []).filter((sk) => sk.status !== 'approved');
+  check('匿名列表不含未上架技能', anonLeak.length === 0, `leak=${anonLeak.length}`);
+
+  const ownerList = await req('GET', '/api/v1/skills', { token: ctx.devToken });
+  check('提交者可在列表看到自己的待审核技能', (ownerList.body || []).some((sk) => sk.id === ctx.skillId), `count=${(ownerList.body || []).length}`);
+
+  const adminList = await req('GET', '/api/v1/skills', { token: ctx.adminToken });
+  check('管理员列表可见未上架技能 (审核队列依赖)', (adminList.body || []).some((sk) => sk.status !== 'approved'), `count=${(adminList.body || []).length}`);
+
+  // —— 作者身份不可伪造：author/department 一律以登录会话为准 ——
+  const forged = await req('POST', '/api/v1/skills/upload', {
+    token: ctx.devToken,
+    body: {
+      name: `冒名技能-${RUN}`,
+      category: 'coding',
+      description: '尝试把作者伪造成超级管理员。',
+      author: '系统超级管理员',
+      department: '安全合规部',
+    },
+  });
+  check('上传技能的作者以登录会话为准 (不可伪造)', forged.body?.author === ctx.devUser?.name, `author=${forged.body?.author}`);
+  check('上传技能记录了提交者 ID', Boolean(forged.body?.submitterId), `submitterId=${forged.body?.submitterId}`);
+  if (forged.body?.id) {
+    await req('DELETE', `/api/v1/skills/${forged.body.id}`, { token: ctx.adminToken });
+  }
 
   const approve = await req('POST', `/api/v1/skills/${ctx.skillId}/approve`, {
     token: ctx.adminToken,
@@ -868,6 +900,82 @@ async function testPrivilegeBoundaries() {
 
   const adminLlm = await req('GET', '/api/v1/audit/llm-config', { token: ctx.adminToken });
   check('管理员可读取 LLM 网关', adminLlm.status === 200 && typeof adminLlm.body?.modelName === 'string', `status=${adminLlm.status}`);
+
+  // —— 体检得分回写：安全评分是审核核心依据，必须管理员专属 ——
+  const scoreTarget = await req('POST', '/api/v1/skills/upload', {
+    token: ctx.devToken,
+    body: {
+      name: `越权体检分-${RUN}`,
+      category: 'coding',
+      description: '验证体检得分回写的鉴权边界。',
+      author: 'QA机器人',
+    },
+  });
+  const scoreId = scoreTarget.body?.id;
+
+  const anonScore = await req('PATCH', `/api/v1/skills/${scoreId}/audit-score`, { body: { score: 100 } });
+  check('匿名篡改体检得分被拒 (401)', anonScore.status === 401, `status=${anonScore.status}`);
+
+  const userScore = await req('PATCH', `/api/v1/skills/${scoreId}/audit-score`, {
+    token: ctx.devToken,
+    body: { score: 100 },
+  });
+  check('普通用户篡改体检得分被拒 (403)', userScore.status === 403, `status=${userScore.status}`);
+
+  // —— 互动计数：点赞/收藏必须登录，下载保留匿名（产品允许访客下载）——
+  const anonLike = await req('PATCH', `/api/v1/skills/${scoreId}/metrics`, { body: { metric: 'likes' } });
+  check('匿名刷点赞被拒 (401)', anonLike.status === 401, `status=${anonLike.status}`);
+
+  const anonStar = await req('PATCH', `/api/v1/skills/${scoreId}/metrics`, { body: { metric: 'stars' } });
+  check('匿名刷收藏被拒 (401)', anonStar.status === 401, `status=${anonStar.status}`);
+
+  const anonDownload = await req('PATCH', `/api/v1/skills/${scoreId}/metrics`, { body: { metric: 'downloads' } });
+  check('匿名下载计数仍放行 (访客可下载)', anonDownload.status === 200, `status=${anonDownload.status}`);
+  const firstDownloads = Number(anonDownload.body?.downloads ?? 0);
+
+  // 刷榜防护：同一来源对同一技能的下载计数在冷却窗口内只计一次
+  for (let i = 0; i < 20; i += 1) {
+    await req('PATCH', `/api/v1/skills/${scoreId}/metrics`, { body: { metric: 'downloads' } });
+  }
+  const afterSpam = await req('GET', `/api/v1/skills/${scoreId}`, { token: ctx.adminToken });
+  check('同源重复上报下载计数被去重 (防刷榜)', Number(afterSpam.body?.downloads) === firstDownloads, `before=${firstDownloads} after=${afterSpam.body?.downloads}`);
+
+  if (scoreId) await req('DELETE', `/api/v1/skills/${scoreId}`, { token: ctx.adminToken });
+
+  // —— 组织成员名单：含全员工号/邮箱/部门，仅管理员可读 ——
+  const userRoster = await req('GET', '/api/v1/auth/users', { token: ctx.devToken });
+  check('普通用户拉取组织成员名单被拒 (403)', userRoster.status === 403, `status=${userRoster.status}`);
+}
+
+/**
+ * 分组十六：登录爆破节流
+ * 同一账号连续失败超过阈值后必须返回 429，避免在线口令爆破
+ */
+async function testLoginThrottle() {
+  group('16. 登录爆破节流');
+
+  // 用一个本轮专属的不存在账号，避免锁定回归所用的真实账号
+  const victim = `throttle-${RUN}`;
+  let sawTooMany = false;
+  let firstStatus = 0;
+  for (let i = 0; i < 12; i += 1) {
+    const res = await req('POST', '/api/v1/auth/login', {
+      body: { account: victim, password: `wrong-${i}` },
+    });
+    if (i === 0) firstStatus = res.status;
+    if (res.status === 429) {
+      sawTooMany = true;
+      break;
+    }
+  }
+  check('首次错误密码返回 401 而非 429', firstStatus === 401, `status=${firstStatus}`);
+  check('连续错误密码触发 429 节流', sawTooMany, '12 次尝试内未出现 429');
+
+  // 节流按账号维度隔离：正常账号不受他人失败影响
+  const healthy = await req('POST', '/api/v1/auth/login', {
+    body: { account: 'admin', password: 'skill@2026' },
+  });
+  check('节流不影响其他账号正常登录', [200, 201].includes(healthy.status), `status=${healthy.status}`);
 }
 
 /**
@@ -1006,7 +1114,7 @@ async function testSkillExpertDomains() {
   check('管理员设置专家组归属成功', update.status === 200, `status=${update.status}`);
   check('专家组归属去重存储', JSON.stringify(update.body?.expertDomains || []) === JSON.stringify(['fullstack', 'dba']), `domains=${JSON.stringify(update.body?.expertDomains)}`);
 
-  const detail = await req('GET', `/api/v1/skills/${skillId}`);
+  const detail = await req('GET', `/api/v1/skills/${skillId}`, { token: ctx.adminToken });
   check('详情接口返回专家组归属', Array.isArray(detail.body?.expertDomains) && detail.body.expertDomains.includes('fullstack'), `domains=${JSON.stringify(detail.body?.expertDomains)}`);
 
   const clear = await req('PUT', `/api/v1/skills/${skillId}/expert-domains`, {
@@ -1226,6 +1334,8 @@ async function main() {
   await testSkillExpertDomains();
   await testExpertDomainCrud();
   await testZipRoundTrip();
+  // 节流会锁定被测账号，放在最后执行避免影响前序分组
+  await testLoginThrottle();
 
   console.log(`\n${'─'.repeat(60)}`);
   console.log(`\x1b[32m通过 ${passed}\x1b[0m  \x1b[31m失败 ${failed}\x1b[0m  合计 ${passed + failed}`);

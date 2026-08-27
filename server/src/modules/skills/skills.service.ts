@@ -13,6 +13,7 @@ import {
 } from '../git-market/git-market.service';
 import { AuditService } from '../audit/audit.service';
 import * as JSZip from 'jszip';
+import { shouldSeedDemoData } from '../../common/runtime-env';
 
 export interface FileTreeNode {
   name: string;
@@ -40,6 +41,7 @@ const LIST_SKILL_COLUMNS = [
   'category',
   'description',
   'author',
+  'submitterId',
   'department',
   'avatar',
   'version',
@@ -106,6 +108,12 @@ export class SkillsService implements OnModuleInit {
           (error as Error).message,
         );
       }
+      return;
+    }
+
+    // 空库时才播种；生产环境默认不塞演示技能（真实集市应由员工提交填充）
+    if (count === 0 && !shouldSeedDemoData()) {
+      console.log('ℹ️  已跳过预置技能播种 (生产环境 / SEED_DEMO_DATA=false)');
       return;
     }
 
@@ -203,11 +211,14 @@ export class SkillsService implements OnModuleInit {
    * 获取技能列表（支持分类、状态和关键词过滤）
    * @param query 查询参数对象
    */
-  async findAll(query: {
-    category?: string;
-    status?: string;
-    search?: string;
-  }): Promise<SkillEntity[]> {
+  async findAll(
+    query: {
+      category?: string;
+      status?: string;
+      search?: string;
+    },
+    viewer?: { id: string; role: string } | null,
+  ): Promise<SkillEntity[]> {
     const where: any = {};
     if (query.category && query.category !== 'all') {
       where.category = query.category;
@@ -223,6 +234,19 @@ export class SkillsService implements OnModuleInit {
       // zipBlob 单条数 MB（只走 /skills/:id/zip）。详见 LIST_SKILL_COLUMNS 注释。
       select: LIST_SKILL_COLUMNS,
     });
+
+    // 可见性收敛：此前列表把待审核/已驳回/已下架技能一并下发，仅靠前端过滤隐藏，
+    // 任何人直接调接口就能看到别人尚未通过审核的技能名称、简介与作者。
+    // 规则：管理员看全部（审核队列依赖）；普通用户看"已上架 + 自己提交的"；匿名只看已上架。
+    const isPrivileged =
+      viewer?.role === 'admin' || viewer?.role === 'super_admin';
+    if (!isPrivileged) {
+      skills = skills.filter(
+        (skill) =>
+          skill.status === 'approved' ||
+          (!!viewer?.id && skill.submitterId === viewer.id),
+      );
+    }
 
     if (query.search) {
       const s = query.search.toLowerCase();
@@ -241,7 +265,10 @@ export class SkillsService implements OnModuleInit {
    * 根据 Slug 或 ID 查询技能详情
    * @param slugOrId Slug 标识或 UUID
    */
-  async findBySlug(slugOrId: string): Promise<SkillEntity> {
+  async findBySlug(
+    slugOrId: string,
+    viewer?: { id: string; role: string } | null,
+  ): Promise<SkillEntity> {
     const clean = slugOrId.startsWith('@') ? slugOrId : `@skillhub/${slugOrId}`;
     const skill = await this.skillRepository.findOne({
       where: [{ slug: slugOrId }, { slug: clean }, { id: slugOrId }],
@@ -250,6 +277,15 @@ export class SkillsService implements OnModuleInit {
     });
 
     if (!skill) {
+      throw new NotFoundException(`未找到指定技能: ${slugOrId}`);
+    }
+
+    // 与列表同源的可见性规则：未上架技能的源码只对管理员与提交者本人开放，
+    // 返回 404 而非 403，避免暴露"该 slug 存在但你看不到"这一信息
+    const isPrivileged =
+      viewer?.role === 'admin' || viewer?.role === 'super_admin';
+    const isOwner = !!viewer?.id && skill.submitterId === viewer.id;
+    if (skill.status !== 'approved' && !isPrivileged && !isOwner) {
       throw new NotFoundException(`未找到指定技能: ${slugOrId}`);
     }
     return skill;
@@ -368,6 +404,8 @@ export class SkillsService implements OnModuleInit {
     category: any;
     description: string;
     author: string;
+    /** 提交者用户 ID，由控制器从登录会话注入（不接受前端传值） */
+    submitterId?: string;
     department?: string;
     avatar?: string;
     version?: string;
@@ -432,6 +470,7 @@ export class SkillsService implements OnModuleInit {
       category: payload.category || 'coding',
       description: payload.description,
       author: payload.author,
+      submitterId: payload.submitterId || null,
       department: payload.department || '研发中心',
       avatar:
         payload.avatar ||

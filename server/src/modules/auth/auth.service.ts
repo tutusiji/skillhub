@@ -15,6 +15,12 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { findByUuid } from '../../common/db-id.util';
 import { OssIamService } from './oss-iam.service';
+import { shouldSeedDemoData } from '../../common/runtime-env';
+import {
+  assertLoginAllowed,
+  recordLoginFailure,
+  recordLoginSuccess,
+} from '../../common/login-throttle';
 
 /** 超级管理员的固定登录名，该标识为系统保留、不可注册 */
 export const SUPER_ADMIN_LOGIN = 'admin';
@@ -73,7 +79,9 @@ export class AuthService implements OnModuleInit {
    */
   async onModuleInit() {
     const count = await this.userRepository.count();
-    if (count === 0) {
+    // 演示普通用户共用弱口令，生产环境不播种；
+    // 超级管理员由下方 reconcileAccounts 保证始终存在（生产也需要它才能接管系统）
+    if (count === 0 && shouldSeedDemoData()) {
       await this.seedPresetUsers();
     }
     // 已有数据也要校正：角色改名、补工号、确保超管存在
@@ -321,15 +329,20 @@ export class AuthService implements OnModuleInit {
    * 邮箱通道仅为历史账号兜底，前端只暴露工号/登录名输入
    * @param dto 登录参数 (账号、密码)
    */
-  async login(dto: LoginDto): Promise<AuthResponse> {
+  async login(dto: LoginDto, clientIp?: string): Promise<AuthResponse> {
     const account = (dto.account || dto.email || '').trim();
     if (!account) {
       throw new UnauthorizedException('请输入登录账号');
     }
 
+    // 口令爆破防护：同一账号/同一 IP 在滑动窗口内失败过多直接 429。
+    // 超管登录名固定为 admin，没有节流等于把它暴露给在线爆破。
+    assertLoginAllowed(account, clientIp);
+
     const user = await this.resolveLoginAccount(account);
     // 用户不存在与密码错误返回同一提示，避免账号枚举
     if (!user) {
+      recordLoginFailure(account, clientIp);
       throw new UnauthorizedException('账号或密码不正确');
     }
 
@@ -342,9 +355,11 @@ export class AuthService implements OnModuleInit {
 
     const isMatch = await bcrypt.compare(dto.password, user.passwordHash);
     if (!isMatch) {
+      recordLoginFailure(account, clientIp);
       throw new UnauthorizedException('账号或密码不正确');
     }
 
+    recordLoginSuccess(account, clientIp);
     return {
       token: this.generateJwt(user),
       user: this.toSessionUser(user),
@@ -377,16 +392,21 @@ export class AuthService implements OnModuleInit {
    * 内部 IAM 单点登录：校验通过后按工号幂等开号
    * @param employeeId 员工工号
    */
-  async ossLogin(employeeId: string): Promise<AuthResponse> {
+  async ossLogin(employeeId: string, clientIp?: string): Promise<AuthResponse> {
     const trimmed = (employeeId || '').trim();
     if (!trimmed) {
       throw new BadRequestException('请输入员工工号');
     }
 
+    // 单点登录同样要节流：失败即计数，防止批量枚举工号刷开账号
+    assertLoginAllowed(trimmed, clientIp);
+
     const profile = await this.ossIamService.verifyEmployee(trimmed);
     if (!profile) {
+      recordLoginFailure(trimmed, clientIp);
       throw new UnauthorizedException('内部 IAM 未找到该工号对应的在职员工');
     }
+    recordLoginSuccess(trimmed, clientIp);
 
     let user = await this.userRepository.findOne({
       where: { employeeId: profile.employeeId },

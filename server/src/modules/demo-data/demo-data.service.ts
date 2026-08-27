@@ -6,6 +6,7 @@ import { UserEntity } from '../../database/entities/user.entity';
 import { SkillEntity } from '../../database/entities/skill.entity';
 import { SkillDemandEntity } from '../../database/entities/skill-demand.entity';
 import { FeedbackEntity } from '../../database/entities/feedback.entity';
+import { shouldSeedDemoData } from '../../common/runtime-env';
 
 /**
  * 演示数据播种服务
@@ -47,6 +48,13 @@ export class DemoDataService implements OnModuleInit {
    * 模块初始化：幂等播种模拟员工与演示数据
    */
   async onModuleInit(): Promise<void> {
+    // 生产环境默认不播种：演示账号共用弱口令 Password123!，
+    // 随生产实例上线即等同于一组可直接登录的后门账号。
+    // 需要在类生产环境做演练时显式设置 SEED_DEMO_DATA=true。
+    if (!shouldSeedDemoData()) {
+      console.log('ℹ️  已跳过演示数据播种 (生产环境 / SEED_DEMO_DATA=false)');
+      return;
+    }
     await this.seedEmployees();
     await this.seedDemoData();
   }

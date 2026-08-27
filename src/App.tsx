@@ -1,10 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import {
-  INITIAL_AUDIT_RULES,
-  INITIAL_DEEPSEEK_CONFIG,
-  INITIAL_FEEDBACK,
-  INITIAL_USERS,
-} from './mock/initialData';
 import { 
   AuditExecutionSummary, 
   AuditRule, 
@@ -33,6 +27,7 @@ import { LoginModal } from './components/LoginModal';
 import { BackToTop } from './components/BackToTop';
 import { ToastContainer } from './components/Toast';
 import { downloadSkillAsZip } from './utils/zipHelper';
+import { isOwnSubmission } from './utils/skillOwnership';
 import { executeDualEngineAudit } from './utils/auditRunner';
 import { api, mapApiDemand, mapApiFeedback, mapApiSkill, mapApiUser, mapAuditRule, syncToBackend } from './services/api';
 import { FeedbackAdminView } from './components/FeedbackAdminView';
@@ -67,14 +62,16 @@ function parseLocation(pathname: string): { tab: NavigationTab | 'detail'; skill
 }
 
 export default function App() {
-  // 业务数据一律以数据库/后端为权威，本地仅用编译期 mock 常量作为离线演示兜底，
-  // 不再读写 localStorage（认证令牌除外）——见下方各 state 初始化与登录后的后端拉取
+  // 业务数据一律以数据库/后端为权威：所有列表初值必须为空，由后端接口填充。
+  // 任何"编译期 mock 打底"都会让首屏渲染出库里不存在的数据（虚假信息），
+  // 并在真实数据返回后被整体替换（表现为内容闪现即消失）。
+  // 不再读写 localStorage（认证令牌除外）。
 
-  // 组织用户名单（登录后由 /auth/users 覆盖）
-  const [allUsers, setAllUsers] = useState<UserAccount[]>(INITIAL_USERS);
+  // 组织成员名单：仅超管的权限设置页需要，登录后由 /auth/users 拉取（普通用户无权限，保持为空）
+  const [allUsers, setAllUsers] = useState<UserAccount[]>([]);
 
   // 技能列表：以数据库为唯一数据源，初值必须为空数组。
-  // 若用 INITIAL_SKILLS 打底，首屏会先渲染一批库里并不存在的演示技能，
+  // 曾用一批编译期演示技能打底，首屏会先渲染出库里并不存在的卡片，
   // 待 /skills 返回后被整体替换 —— 用户看到的就是「技能闪现一下又消失」。
   const [skills, setSkills] = useState<SkillItem[]>([]);
 
@@ -84,13 +81,26 @@ export default function App() {
   // 征集需求（启动后由 /demands 覆盖，同样不用 mock 打底）
   const [demands, setDemands] = useState<SkillDemand[]>([]);
 
-  const [rules, setRules] = useState<AuditRule[]>(INITIAL_AUDIT_RULES);
+  // 风控规则：后端 /audit/rules 为唯一数据源（服务端已 seed 预置规则），
+  // 本地不再内置一份副本，否则前端正则引擎会用与服务端不一致的规则做体检
+  const [rules, setRules] = useState<AuditRule[]>([]);
 
-  // 建议列表：后端为数据源（登录后拉取）
-  const [feedbackList, setFeedbackList] = useState<FeedbackItem[]>(INITIAL_FEEDBACK);
+  // 建议列表：后端为数据源（登录后拉取，未登录时为空）。
+  // 此前用 mock 打底会让任何访客看到两条伪造的"他人建议"（含姓名与邮箱）
+  const [feedbackList, setFeedbackList] = useState<FeedbackItem[]>([]);
 
-  // LLM 网关展示配置：真实凭据由后端持久化，展示态由风控中心从 /audit/llm-config 拉取
-  const [deepseekConfig, setDeepseekConfig] = useState<DeepSeekConfig>(INITIAL_DEEPSEEK_CONFIG);
+  // LLM 网关展示配置：真实凭据与生效配置一律由后端 /audit/llm-config 持久化，
+  // 前端只保留一份中性占位（不写死任何厂商地址/模型名，避免页脚显示与实际网关不符）
+  const [deepseekConfig, setDeepseekConfig] = useState<DeepSeekConfig>({
+    baseUrl: '',
+    apiKey: '',
+    modelName: '',
+    temperature: 0.1,
+    maxTokens: 2048,
+    systemPrompt:
+      '你是一个企业级 AI 技能安全合规审计引擎。请对待审代码与 Prompt 模板做多维度语义风险推导，输出风险等级、漏洞位置与整改建议。',
+    testStatus: 'untested',
+  });
 
   // 当前登录用户（null = 未登录/访客）。启动时若有有效令牌，由 /auth/me 回源最新身份
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
@@ -1156,9 +1166,9 @@ export default function App() {
   const totalPendingReviewsCount = pendingSkillReviewsCount + pendingDemandReviewsCount;
   
   const starredCount = skills.filter(s => s.isStarred).length;
-  const mySubmissionsCount = currentUser ? skills.filter(s => 
-    s.author.name === currentUser.name || s.author.name === 'Alex Chen' || s.author.name === '林晨 (开发架构组)'
-  ).length : 0;
+  const mySubmissionsCount = currentUser
+    ? skills.filter(s => isOwnSubmission(s, currentUser)).length
+    : 0;
 
   const isSuperAdmin = currentUser?.role === 'super_admin';
   const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
@@ -1235,18 +1245,6 @@ export default function App() {
           setShowLoginModal(true);
         }}
         currentUser={currentUser}
-        allUsers={allUsers}
-        onSwitchUser={(user) => {
-          setCurrentUser(user);
-          // If switching to non-superadmin while on settings, redirect to market
-          if (user.role !== 'super_admin' && currentTab === 'settings') {
-            navigate('market');
-          }
-          if (user.role === 'user' && (currentTab === 'audit' || currentTab === 'rules')) {
-            navigate('market');
-          }
-          addToast('info', '身份预览已切换', `当前预览身份：${user.name} (${user.role === 'super_admin' ? '超级管理员' : user.role === 'admin' ? '管理员' : '普通用户'})。写操作仍以登录账号身份提交，如需真实切换请退出后重新登录。`);
-        }}
         onLogout={handleLogout}
         pendingReviewsCount={totalPendingReviewsCount}
         starredCount={starredCount}
@@ -1573,7 +1571,7 @@ export default function App() {
               className={`w-1.5 h-1.5 rounded-full ${backendOnline === false ? 'bg-amber-400' : backendOnline ? 'bg-emerald-500' : 'bg-slate-300 animate-pulse'}`}
               title={backendOnline === false ? '后端离线：当前使用本地演示数据' : backendOnline ? '企业后端已连接' : '正在连接企业后端'}
             />
-            <span>风控中心 v3.4 (驱动: {deepseekConfig.modelName})</span>
+            <span>风控中心 v3.4 (驱动: {deepseekConfig.modelName || '未配置'})</span>
           </div>
           <div className="flex items-center gap-4">
             <button

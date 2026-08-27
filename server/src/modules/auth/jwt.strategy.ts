@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { AuthService } from './auth.service';
+import { resolveJwtSecret } from '../../common/runtime-env';
 
 /**
  * Passport JWT 鉴权解析策略
@@ -13,7 +14,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || 'skillhub_enterprise_secret_key_2026',
+      // 与签发端共用同一解析逻辑，避免两处默认值不一致导致"签得出、验不过"
+      secretOrKey: resolveJwtSecret(),
     });
   }
 

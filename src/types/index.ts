@@ -162,6 +162,11 @@ export interface SkillItem {
     department: string;
     verified: boolean;
   };
+  /**
+   * 提交者的用户 ID（由后端从登录会话写入）
+   * 判定「我的提交」必须用它：作者姓名可重名、也曾被前端伪造传入
+   */
+  submitterId?: string;
   tags: string[];
   likes: number;
   stars: number;

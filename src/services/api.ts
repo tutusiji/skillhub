@@ -116,6 +116,8 @@ export interface ApiSkill {
   description: string;
   category: string;
   author: string;
+  /** 提交者用户 ID（后端从登录会话写入，用于判定「我的提交」） */
+  submitterId?: string | null;
   avatar?: string;
   department?: string;
   status?: string;
@@ -150,6 +152,7 @@ export function mapApiSkill(skill: ApiSkill): SkillItem {
     description: skill.description,
     category: skill.category as SkillCategory,
     zipFileName: skill.zipFileName ?? undefined,
+    submitterId: skill.submitterId ?? undefined,
     clients: (skill.clients ?? ['claude']) as ClientPlatform[],
     author: {
       name: skill.author,

@@ -19,6 +19,7 @@ import { Request, Response } from 'express';
 import { SkillsService } from './skills.service';
 import { SkillEntity } from '../../database/entities/skill.entity';
 import { AuthService, UserSession } from '../auth/auth.service';
+import { shouldCountMetric } from '../../common/metric-throttle';
 
 /**
  * 技能集市与插件生命周期 API 控制器
@@ -41,8 +42,13 @@ export class SkillsController {
     @Query('category') category?: string,
     @Query('status') status?: string,
     @Query('search') search?: string,
+    @Req() req?: Request,
   ): Promise<SkillEntity[]> {
-    return this.skillsService.findAll({ category, status, search });
+    // 允许匿名浏览，但可见范围按身份收敛（见 SkillsService.findAll）
+    return this.skillsService.findAll(
+      { category, status, search },
+      this.optionalSession(req),
+    );
   }
 
   /**
@@ -50,8 +56,11 @@ export class SkillsController {
    * @param slugOrId 技能标识符
    */
   @Get(':slug')
-  async findBySlug(@Param('slug') slugOrId: string): Promise<SkillEntity> {
-    return this.skillsService.findBySlug(slugOrId);
+  async findBySlug(
+    @Param('slug') slugOrId: string,
+    @Req() req?: Request,
+  ): Promise<SkillEntity> {
+    return this.skillsService.findBySlug(slugOrId, this.optionalSession(req));
   }
 
   /**
@@ -63,8 +72,17 @@ export class SkillsController {
     @Body() body: any,
     @Req() req: Request,
   ): Promise<SkillEntity> {
-    this.resolveSession(req);
-    return this.skillsService.createSkill(body);
+    const operator = this.resolveSession(req);
+    // 作者身份一律以登录会话为准：此前 author/department 直接取请求体，
+    // 任何登录用户都能把技能署名成"超级管理员/安全合规部"来骗取信任
+    // （社会工程学攻击面）。前端传来的这几个字段在此被强制覆盖。
+    return this.skillsService.createSkill({
+      ...body,
+      author: operator.name,
+      department: operator.department,
+      avatar: operator.avatar || body?.avatar,
+      submitterId: operator.id,
+    });
   }
 
   /**
@@ -126,6 +144,10 @@ export class SkillsController {
 
   /**
    * 累加技能社交互动计数 (点赞/收藏/下载)
+   *
+   * 鉴权分级：点赞与收藏是"身份行为"，必须登录后才能计数，否则匿名请求可以
+   * 无限刷高任意技能的 likes/stars 从而操纵集市热门榜；下载计数保持允许匿名，
+   * 因为产品明确允许访客直接下载源码与复制安装指令（见 handleDownloadZip）。
    * @param id 技能 ID
    * @param body metric 指定计数字段，delta 为增量方向
    */
@@ -133,6 +155,7 @@ export class SkillsController {
   async incrementMetric(
     @Param('id') id: string,
     @Body() body: { metric: 'likes' | 'stars' | 'downloads'; delta?: number },
+    @Req() req?: Request,
   ): Promise<SkillEntity> {
     const allowed = ['likes', 'stars', 'downloads'];
     if (!body?.metric || !allowed.includes(body.metric)) {
@@ -140,7 +163,22 @@ export class SkillsController {
         `metric 参数必须为 ${allowed.join(' / ')} 之一`,
       );
     }
-    return this.skillsService.incrementMetric(id, body.metric, body.delta ?? 1);
+    const session =
+      body.metric === 'downloads'
+        ? this.optionalSession(req)
+        : this.resolveSession(req);
+
+    // 去重节流：同一来源对同一技能的同一计数项在冷却窗口内只计一次。
+    // 匿名下载计数必须保留（访客可下载），但不能让脚本把 downloads 刷到几万来操纵热门榜。
+    // 撤销操作（delta<0）不节流，否则"取消收藏"会因窗口未过而不生效。
+    const actor = session?.id || this.clientIp(req);
+    const delta = body.delta ?? 1;
+    if (delta >= 0 && !shouldCountMetric(id, body.metric, actor)) {
+      // 静默返回当前状态：对调用方是幂等成功，不暴露"被节流"这一细节
+      return this.skillsService.findBySlug(id, session);
+    }
+
+    return this.skillsService.incrementMetric(id, body.metric, delta);
   }
 
   /**
@@ -152,7 +190,12 @@ export class SkillsController {
   async updateAuditScore(
     @Param('id') id: string,
     @Body() body: { score: number },
+    @Req() req?: Request,
   ): Promise<SkillEntity> {
+    // 安全体检得分是审核决策的核心依据：此前该接口完全没有鉴权，
+    // 匿名请求即可把任意技能改成 100 分，让恶意技能显示"体检满分"骗过人工审核。
+    // 该操作只会由管理员在审核页/风控中心发起，因此收紧为管理员专属。
+    this.assertPrivileged(req, '回写技能体检得分');
     if (typeof body?.score !== 'number' || Number.isNaN(body.score)) {
       throw new BadRequestException('score 必须为合法数值');
     }
@@ -189,6 +232,9 @@ export class SkillsController {
     @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
+    // 未上架技能的源码包不对无关方开放（findBySlug 会在无权时抛 404）
+    await this.skillsService.findBySlug(id, this.optionalSession(req));
+
     const result = await this.skillsService.getOriginalZip(id);
     if (!result) {
       throw new NotFoundException('该技能没有保留原始 ZIP 压缩包');
@@ -212,6 +258,34 @@ export class SkillsController {
   ): Promise<{ success: boolean; id: string }> {
     this.assertPrivileged(req, '删除技能');
     return this.skillsService.deleteSkill(id);
+  }
+
+  /**
+   * 解析请求来源 IP，用于互动计数的去重节流
+   * 反代场景下 req.ip 需开启 trust proxy 才准确，故额外兼容 X-Forwarded-For
+   * @param req HTTP 请求对象
+   */
+  private clientIp(req?: Request): string | undefined {
+    if (!req) return undefined;
+    const forwarded = req.headers?.['x-forwarded-for'];
+    const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    const first = (raw || '').split(',')[0].trim();
+    return first || req.ip || undefined;
+  }
+
+  /**
+   * 尽力解析当前访问者会话，未登录或令牌失效时返回 null（不抛异常）
+   *
+   * 集市浏览允许匿名，但"能看到哪些技能"必须按身份收敛，
+   * 因此读接口需要一个不强制登录、只用于判定可见范围的会话解析入口。
+   * @param req HTTP 请求对象
+   */
+  private optionalSession(req?: Request): UserSession | null {
+    const authHeader = req?.headers?.['authorization'];
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : (req?.query?.token as string);
+    return token ? this.authService.validateToken(token) : null;
   }
 
   /**

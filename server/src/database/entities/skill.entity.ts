@@ -36,6 +36,14 @@ export class SkillEntity {
   @Column({ length: 100 })
   author: string;
 
+  /**
+   * 提交者的用户 ID（由登录会话写入，不接受前端传值）
+   * 用它而不是 author 姓名来判定"我的提交"：姓名可重复也可被伪造，
+   * 只有用户 ID 才能稳定归属技能（个人中心与审核追溯都依赖它）
+   */
+  @Column({ name: 'submitter_id', type: 'text', nullable: true })
+  submitterId: string | null;
+
   /** 归属部门 */
   @Column({ default: '研发中心', length: 100 })
   department: string;

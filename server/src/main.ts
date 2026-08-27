@@ -4,6 +4,7 @@ import { AppModule } from './app.module';
 import { json, urlencoded, raw, static as expressStatic } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
+import { isProduction, resolveCorsOrigin } from './common/runtime-env';
 
 /**
  * 启动 NestJS 服务端核心应用程序
@@ -12,9 +13,12 @@ import * as path from 'path';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  // 1. 允许跨域请求，支持前端 React 应用 (默认 3000 端口) 访问
+  // 1. 跨域策略：开发环境放开便于 Vite dev server 直连；
+  //    生产默认同源（后端托管前端静态资源），需要独立前端域名时用 CORS_ORIGINS 白名单。
+  //    此前写死 origin:'*' + credentials:true —— 任意外部站点都能用受害者的令牌
+  //    直接调用内网 API（CSRF / 数据外带），生产环境不可接受。
   app.enableCors({
-    origin: '*',
+    origin: resolveCorsOrigin(),
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });

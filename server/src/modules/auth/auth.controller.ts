@@ -39,8 +39,11 @@ export class AuthController {
    */
   @Post('login')
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
-  async login(@Body() loginDto: LoginDto): Promise<AuthResponse> {
-    return this.authService.login(loginDto);
+  async login(
+    @Body() loginDto: LoginDto,
+    @Req() req?: Request,
+  ): Promise<AuthResponse> {
+    return this.authService.login(loginDto, this.clientIp(req));
   }
 
   /**
@@ -50,8 +53,9 @@ export class AuthController {
   @Post('oss-login')
   async ossLogin(
     @Body() body: { employeeId?: string },
+    @Req() req?: Request,
   ): Promise<AuthResponse> {
-    return this.authService.ossLogin(body?.employeeId || '');
+    return this.authService.ossLogin(body?.employeeId || '', this.clientIp(req));
   }
 
   /**
@@ -80,11 +84,17 @@ export class AuthController {
 
   /**
    * 获取企业用户列表 (供超管委任管理员与人员选择)
-   * 需登录后访问：该列表含邮箱、角色、部门与积分，不可匿名暴露
+   *
+   * 仅管理员可读：该列表包含全员工号、企业邮箱、部门与积分余额，
+   * 属于组织人员信息，对普通员工开放等于全站可导出通讯录（信息收集/钓鱼前置）。
+   * 前端只有超管的「权限设置」页需要它，普通用户路径不依赖该接口。
    */
   @Get('users')
   async getAllUsers(@Req() req: Request): Promise<UserSession[]> {
-    this.resolveSession(req);
+    const operator = this.resolveSession(req);
+    if (operator.role !== 'admin' && operator.role !== 'super_admin') {
+      throw new ForbiddenException('仅管理员有权查看组织成员名单');
+    }
     return this.authService.getAllUsers();
   }
 
@@ -144,6 +154,20 @@ export class AuthController {
       throw new ForbiddenException('无权调整其他成员的积分余额');
     }
     return this.authService.adjustUserPoints(id, body?.delta);
+  }
+
+  /**
+   * 解析请求来源 IP，用于登录失败节流
+   * 反向代理场景下 Express 的 req.ip 需要开启 trust proxy 才准确，
+   * 因此这里额外兼容 X-Forwarded-For 的首个地址。
+   * @param req HTTP 请求对象
+   */
+  private clientIp(req?: Request): string | undefined {
+    if (!req) return undefined;
+    const forwarded = req.headers['x-forwarded-for'];
+    const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    const first = (raw || '').split(',')[0].trim();
+    return first || req.ip || undefined;
   }
 
   /**

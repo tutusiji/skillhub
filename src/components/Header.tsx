@@ -7,7 +7,6 @@ import {
   Sliders, 
   User, 
   ChevronDown, 
-  Check, 
   LogOut, 
   LogIn,
   MessageSquare,
@@ -35,8 +34,6 @@ interface HeaderProps {
   onOpenCommandPalette: () => void;
   onOpenLogin: () => void;
   currentUser: UserAccount | null;
-  allUsers: UserAccount[];
-  onSwitchUser: (user: UserAccount) => void;
   onLogout: () => void;
   pendingReviewsCount: number;
   openDemandsCount?: number;
@@ -54,8 +51,6 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCommandPalette,
   onOpenLogin,
   currentUser,
-  allUsers,
-  onSwitchUser,
   onLogout,
   pendingReviewsCount,
   openDemandsCount = 0,
@@ -74,14 +69,6 @@ export const Header: React.FC<HeaderProps> = ({
     isSuperAdmin || (currentUser?.role === 'admin' && menuPermissions.includes('audit'));
   const canAccessRules =
     isSuperAdmin || (currentUser?.role === 'admin' && menuPermissions.includes('rules'));
-
-  // 演示账号切换列表：仅保留超级管理员 + 第一个普通用户
-  // 不渲染全量员工名单，避免把组织人员结构暴露给当前登录者
-  const demoSwitchUsers = React.useMemo(() => {
-    const superAdmin = allUsers.find(u => u.role === 'super_admin');
-    const normalUser = allUsers.find(u => u.role === 'user');
-    return [superAdmin, normalUser].filter((u): u is UserAccount => Boolean(u));
-  }, [allUsers]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -384,53 +371,6 @@ export const Header: React.FC<HeaderProps> = ({
                       <span className="text-[10px] text-slate-400">组织管理</span>
                     </button>
                   )}
-
-                  {/* Role Switcher Section */}
-                  <div className="pt-2 border-t border-slate-100">
-                    <div className="px-2 pb-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      快速切换账号模拟体验
-                    </div>
-
-                    <div className="space-y-1">
-                      {/* 仅展示超管 + 一个普通用户两个演示身份，避免全量员工名单泄漏 */}
-                      {demoSwitchUsers.map(user => {
-                        const isSelected = user.id === currentUser.id;
-                        return (
-                          <div
-                            key={user.id}
-                            onClick={() => {
-                              onSwitchUser(user);
-                              setShowUserMenu(false);
-                            }}
-                            className={`flex items-center justify-between p-2 rounded-xl cursor-pointer transition-colors ${
-                              isSelected
-                                ? 'bg-indigo-50 text-indigo-900 font-bold border border-indigo-200/80'
-                                : 'hover:bg-slate-100 text-slate-700'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <img
-                                src={user.avatar}
-                                alt={user.name}
-                                className="w-6 h-6 rounded-lg object-cover"
-                              />
-                              <div className="min-w-0">
-                                <div className="truncate text-xs font-semibold">{user.name}</div>
-                                <div className="text-[10px] text-slate-400 truncate">
-                                  {user.role === 'super_admin' ? '🛡️ 超级管理员' : '💻 普通用户'} · {user.department}
-                                </div>
-                              </div>
-                            </div>
-                            {isSelected && <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <p className="px-2 pt-1.5 text-[10px] text-slate-400 leading-relaxed">
-                      切换仅预览身份界面，写操作仍以登录账号提交；如需真实切换请退出后重新登录。
-                    </p>
-                  </div>
 
                   {/* Logout Button */}
                   <div className="pt-2 border-t border-slate-100">

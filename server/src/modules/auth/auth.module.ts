@@ -9,6 +9,7 @@ import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
 import { JwtStrategy } from './jwt.strategy';
 import { OssIamService } from './oss-iam.service';
+import { resolveJwtSecret } from '../../common/runtime-env';
 
 /**
  * 全局用户认证与 JWT 鉴权模块
@@ -22,10 +23,14 @@ import { OssIamService } from './oss-iam.service';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
-        secret:
-          configService.get<string>('JWT_SECRET') ||
-          'skillhub_enterprise_secret_key_2026',
-        signOptions: { expiresIn: '7d' }, // Token 默认 7 天有效
+        // 生产环境未配置强密钥时 resolveJwtSecret 会抛错终止启动：
+        // 源码内置的默认密钥是公开的，任何人都能用它自签 super_admin 令牌
+        secret: resolveJwtSecret(configService.get<string>('JWT_SECRET')),
+        // 令牌有效期从 7 天收敛到 12 小时：前端只在 localStorage 存令牌、
+        // 没有刷新令牌机制，7 天意味着一次令牌泄露可被利用整周
+        signOptions: {
+          expiresIn: configService.get<string>('JWT_EXPIRES_IN') || '12h',
+        },
       }),
     }),
   ],
