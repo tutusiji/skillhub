@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Search, ArrowRight, X } from 'lucide-react';
+import { Search, ArrowRight } from 'lucide-react';
 import { SkillItem } from '../types';
+import { Modal } from './Modal';
 
 interface CommandPaletteModalProps {
   isOpen: boolean;
@@ -30,8 +31,6 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
-
   // 全局搜索只展示已审核通过的技能，待审核/驳回/下架技能不出现在搜索结果
   const searchable = skills.filter(s => s.status === 'approved');
 
@@ -46,11 +45,16 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     : searchable.slice(0, 6);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
-      <div 
-        id="command-palette-dialog"
-        className="w-full max-w-2xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden"
-      >
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="2xl"
+      align="top"
+      containerClassName="pt-16 sm:pt-24"
+      showCloseButton={false}
+      panelClassName="!overflow-hidden"
+    >
+      <div id="command-palette-dialog">
         {/* Search input */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200">
           <Search className="w-5 h-5 text-indigo-500 shrink-0" />
@@ -62,12 +66,6 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
             placeholder="搜索技能名称、包标识 (@skillhub/...) 或作者..."
             className="w-full bg-transparent text-sm text-slate-900 placeholder-slate-400 outline-none"
           />
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
 
         {/* Results */}
@@ -109,6 +107,6 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
           ))}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 };

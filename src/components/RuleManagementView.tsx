@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { AuditRule, DeepSeekConfig, RuleSeverity, RuleType, UserAccount } from '../types';
 import { PopconfirmBubble } from './PopconfirmBubble';
+import { Modal } from './Modal';
 import { api, type ApiLlmConfig } from '../services/api';
 
 /** 大模型网关厂商快捷预设：一键回填基址与默认模型 */
@@ -629,34 +630,48 @@ export async function handleUserQuery(input: string) {
       {/* ========================================================================= */}
       {(activeTab === 'regex' || activeTab === 'llm') && (
         <div className="space-y-4">
-          {/* Edit / Create Form Drawer */}
-          {(isCreating || editingRule) ? (
-            <div className="bg-white p-6 sm:p-8 rounded-3xl border border-indigo-200 shadow-lg animate-in slide-in-from-top-2 duration-200 space-y-6">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-                <div className="flex items-center gap-2.5">
-                  <span className="p-2 rounded-xl bg-indigo-50 text-indigo-700">
-                    {formType === 'regex' ? <Terminal className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
-                  </span>
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900">
-                      {isCreating ? `新建 ${formType === 'regex' ? '正则特征模式' : 'LLM 语义安全'} 规则` : `编辑规则: ${editingRule?.name}`}
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      配置拦截模式、严重级别、风控分类与在线单项验证测试
-                    </p>
-                  </div>
+          {/* Edit / Create Form Modal —— 替代原先的内联 drawer，弹窗带进退场动画 */}
+          <Modal
+            isOpen={isCreating || !!editingRule}
+            onClose={() => { setIsCreating(false); setEditingRule(null); }}
+            size="5xl"
+            align="top"
+            containerClassName="pt-12 sm:pt-16"
+            header={
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="p-2 rounded-xl bg-indigo-50 text-indigo-700 shrink-0">
+                  {formType === 'regex' ? <Terminal className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
+                </span>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-slate-900 truncate">
+                    {isCreating ? `新建 ${formType === 'regex' ? '正则特征模式' : 'LLM 语义安全'} 规则` : `编辑规则: ${editingRule?.name ?? ''}`}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    配置拦截模式、严重级别、风控分类与在线单项验证测试
+                  </p>
                 </div>
-
+              </div>
+            }
+            footer={
+              <div className="flex items-center justify-end gap-2">
                 <button
                   onClick={() => { setIsCreating(false); setEditingRule(null); }}
-                  className="px-3.5 py-1.5 rounded-xl text-xs text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors font-semibold"
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200 transition-colors"
                 >
-                  放弃并返回列表
+                  取消
+                </button>
+                <button
+                  onClick={handleSaveRule}
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition-all active:scale-95"
+                >
+                  保存并应用规则
                 </button>
               </div>
-
+            }
+          >
+            <div className="p-5 sm:p-6">
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                {/* Left: Configuration Inputs (8 cols) */}
+                {/* Left: Configuration Inputs (7 cols) */}
                 <div className="lg:col-span-7 space-y-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-800 mb-1">
@@ -752,7 +767,7 @@ export async function handleUserQuery(input: string) {
                 </div>
 
                 {/* Right: Inline Test Sandbox Panel (5 cols) */}
-                <div className="lg:col-span-5 bg-slate-50 p-5 rounded-2xl border border-slate-200 flex flex-col justify-between space-y-4">
+                <div className="lg:col-span-5 bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-4">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
@@ -785,25 +800,10 @@ export async function handleUserQuery(input: string) {
                       </div>
                     )}
                   </div>
-
-                  <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
-                    <button
-                      onClick={() => { setIsCreating(false); setEditingRule(null); }}
-                      className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200 transition-colors"
-                    >
-                      取消
-                    </button>
-                    <button
-                      onClick={handleSaveRule}
-                      className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition-all active:scale-95"
-                    >
-                      保存并应用规则
-                    </button>
-                  </div>
                 </div>
               </div>
             </div>
-          ) : null}
+          </Modal>
 
           {/* Rules Search & Filter Header */}
           <div className="p-4 rounded-2xl bg-white border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">

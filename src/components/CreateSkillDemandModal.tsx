@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
-import { 
-  X, 
-  Sparkles, 
-  Coins, 
-  AlertCircle, 
-  Calendar, 
+import {
+  Sparkles,
+  Coins,
+  AlertCircle,
+  Calendar,
   Layers, 
   HelpCircle, 
   CheckCircle2, 
@@ -15,6 +14,7 @@ import {
 } from 'lucide-react';
 import { ExpertDomain, SkillDemand, UserAccount } from '../types';
 import { useExpertDomains } from '../hooks/useExpertDomains';
+import { Modal } from './Modal';
 
 interface CreateSkillDemandModalProps {
   isOpen: boolean;
@@ -41,12 +41,15 @@ export const CreateSkillDemandModal: React.FC<CreateSkillDemandModalProps> = ({
   const [deadlineText, setDeadlineText] = useState('永久有效');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!isOpen) return null;
-
   if (!currentUser) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-        <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center space-y-6 shadow-2xl border border-slate-200">
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        size="md"
+        showCloseButton={false}
+      >
+        <div className="p-8 text-center space-y-6">
           <div className="w-16 h-16 rounded-3xl bg-amber-50 text-amber-600 border border-amber-200/80 flex items-center justify-center mx-auto shadow-sm">
             <Coins className="w-8 h-8" />
           </div>
@@ -74,7 +77,7 @@ export const CreateSkillDemandModal: React.FC<CreateSkillDemandModalProps> = ({
             </button>
           </div>
         </div>
-      </div>
+      </Modal>
     );
   }
 
@@ -139,24 +142,20 @@ export const CreateSkillDemandModal: React.FC<CreateSkillDemandModalProps> = ({
   const domainOptions = backendDomains;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 relative my-8 text-left space-y-6">
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="absolute top-6 right-6 p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-        >
-          <X className="w-5 h-5" />
-        </button>
-
-        {/* Header */}
-        <div className="flex items-center gap-3.5 pr-8">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="2xl"
+      align="top"
+      containerClassName="pt-10 sm:pt-16"
+      header={
+        <div className="flex items-center gap-3.5 min-w-0">
           <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-600 border border-amber-200/80 flex items-center justify-center shrink-0">
             <Coins className="w-6 h-6" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg sm:text-xl font-black text-slate-900">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-lg sm:text-xl font-black text-slate-900 truncate">
                 发布技能需求征集
               </h2>
               <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 text-[11px] font-bold border border-amber-200">
@@ -168,7 +167,9 @@ export const CreateSkillDemandModal: React.FC<CreateSkillDemandModalProps> = ({
             </p>
           </div>
         </div>
-
+      }
+    >
+      <div className="p-5 sm:p-6 text-left space-y-5">
         {/* Balance Card */}
         <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-50 via-orange-50/50 to-indigo-50/40 border border-amber-200/80 flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
@@ -349,6 +350,6 @@ export const CreateSkillDemandModal: React.FC<CreateSkillDemandModalProps> = ({
           </div>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 };

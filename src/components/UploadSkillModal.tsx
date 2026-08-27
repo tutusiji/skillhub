@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  X,
   Upload,
   FileArchive,
   CheckCircle2,
@@ -19,6 +18,7 @@ import {
   UserAccount,
 } from '../types';
 import { api } from '../services/api';
+import { Modal } from './Modal';
 
 interface UploadSkillModalProps {
   currentUser: UserAccount;
@@ -351,32 +351,48 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-200">
-      <div
-        id="upload-skill-modal"
-        className="relative w-full max-w-2xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
-      >
-        {/* Header */}
-        <div className="p-5 border-b border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <Upload className="w-5 h-5 text-indigo-600" />
-              <span>发布新技能 / 插件</span>
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              上传插件源码 ZIP 包并填写基本信息，提交后自动进入管理员审核
-            </p>
-          </div>
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="2xl"
+      align="top"
+      containerClassName="pt-10 sm:pt-16"
+      panelClassName="!overflow-hidden flex flex-col"
+      header={
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+            <Upload className="w-5 h-5 text-indigo-600 shrink-0" />
+            <span className="truncate">发布新技能 / 插件</span>
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            上传插件源码 ZIP 包并填写基本信息，提交后自动进入管理员审核
+          </p>
+        </div>
+      }
+      footer={
+        <div className="flex items-center justify-end gap-2">
           <button
+            type="button"
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200 transition-colors"
           >
-            <X className="w-5 h-5" />
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={submitting}
+            className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition-all active:scale-95 flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>{submitting ? '提交中...' : '提交发布申请'}</span>
           </button>
         </div>
-
+      }
+    >
+      <div id="upload-skill-modal" className="flex flex-col flex-1 min-h-0">
         {/* Body */}
-        <div className="p-5 overflow-y-auto flex-1 text-xs space-y-4">
+        <div className="p-5 text-xs space-y-4">
           {/* 基础信息 */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="sm:col-span-2">
@@ -543,27 +559,7 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
             </span>
           </div>
         </div>
-
-        {/* Footer */}
-        <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-xs font-bold hover:bg-slate-100"
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 transition-all disabled:opacity-50"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            <span>{submitting ? '提交中...' : '提交发布申请'}</span>
-          </button>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 };

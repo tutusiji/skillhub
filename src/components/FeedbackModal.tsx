@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { X, MessageSquarePlus, Star, Send } from 'lucide-react';
+import { MessageSquarePlus, Star, Send } from 'lucide-react';
 import { UserAccount } from '../types';
+import { Modal } from './Modal';
 
 interface FeedbackModalProps {
   currentUser: UserAccount;
@@ -37,25 +38,19 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
-      <div 
-        id="feedback-modal"
-        className="relative w-full max-w-lg bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden"
-      >
-        {/* Header */}
-        <div className="p-5 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <MessageSquarePlus className="w-5 h-5 text-indigo-600" />
-            <h3 className="text-base font-bold text-slate-900">提交建议</h3>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-          >
-            <X className="w-5 h-5" />
-          </button>
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="lg"
+      panelClassName="!overflow-hidden"
+      header={
+        <div className="flex items-center gap-2 min-w-0">
+          <MessageSquarePlus className="w-5 h-5 text-indigo-600 shrink-0" />
+          <h3 className="text-base font-bold text-slate-900 truncate">提交建议</h3>
         </div>
-
+      }
+    >
+      <div id="feedback-modal">
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
           <div>
@@ -144,6 +139,6 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({
           </div>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 };

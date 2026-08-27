@@ -23,6 +23,7 @@ import { SkillDemand, UserAccount, SkillItem } from '../types';
 import { getExpertDomainMeta } from '../data/expertDomains';
 import { useExpertDomains } from '../hooks/useExpertDomains';
 import { PopconfirmBubble } from './PopconfirmBubble';
+import { Modal } from './Modal';
 
 interface SkillDemandDetailModalProps {
   demand: SkillDemand | null;
@@ -58,8 +59,6 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
   const [showRespondBox, setShowRespondBox] = useState(false);
   // 走 hook，让详情模态的徽章名称也跟随后端修改
   const { domains: expertDomains } = useExpertDomains();
-
-  if (!isOpen || !demand) return null;
 
   const domainMeta = getExpertDomainMeta(demand.targetDomain, expertDomains);
   const isSuperAdmin = currentUser?.role === 'super_admin';
@@ -123,12 +122,19 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 relative my-8 text-left space-y-6">
-        {/* Close button */}
+    <Modal
+      isOpen={isOpen && !!demand}
+      onClose={onClose}
+      size="2xl"
+      align="top"
+      containerClassName="pt-10 sm:pt-16"
+      showCloseButton={false}
+    >
+      <div className="bg-white text-left space-y-6">
+        {/* Close button (absolute, top-right) */}
         <button
           onClick={onClose}
-          className="absolute top-6 right-6 p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+          className="absolute top-5 right-5 p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors z-10"
         >
           <X className="w-5 h-5" />
         </button>
@@ -490,6 +496,6 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 };

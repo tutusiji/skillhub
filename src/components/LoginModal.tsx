@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  X,
   LogIn,
   UserPlus,
   ShieldCheck,
@@ -16,6 +15,7 @@ import {
 } from 'lucide-react';
 import { UserAccount } from '../types';
 import { api, mapApiUser } from '../services/api';
+import { Modal } from './Modal';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -170,8 +170,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   const displayActionTitle = actionHint || pendingActionTitle;
 
-  if (!isOpen) return null;
-
   const tabs: Array<{ id: AuthTab; label: string; icon: React.ReactNode }> = [
     { id: 'login', label: '账号密码登录', icon: <LogIn className="w-4 h-4" /> },
     { id: 'oss', label: '内部 OSS 登录', icon: <Fingerprint className="w-4 h-4" /> },
@@ -179,35 +177,28 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
-      <div
-        id="login-auth-modal"
-        className="relative w-full max-w-lg bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150"
-      >
-        {/* Header */}
-        <div className="p-6 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/20">
-              {activeTab === 'register' ? <UserPlus className="w-5 h-5" /> : <LogIn className="w-5 h-5" />}
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900">
-                {displayActionTitle ? `请先登录以${displayActionTitle}` : 'SkillHub 企业统一身份认证'}
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                支持工号密码登录、内部 IAM 单点登录与新员工自助注册
-              </p>
-            </div>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="lg"
+      panelClassName="!overflow-hidden"
+      header={
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
+            {activeTab === 'register' ? <UserPlus className="w-5 h-5" /> : <LogIn className="w-5 h-5" />}
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full hover:bg-slate-200 text-slate-400 hover:text-slate-700 flex items-center justify-center transition-colors"
-            title="关闭"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="min-w-0">
+            <h3 className="text-base font-bold text-slate-900 truncate">
+              {displayActionTitle ? `请先登录以${displayActionTitle}` : 'SkillHub 企业统一身份认证'}
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              支持工号密码登录、内部 IAM 单点登录与新员工自助注册
+            </p>
+          </div>
         </div>
-
+      }
+    >
+      <div id="login-auth-modal">
         {/* Tab Navigation */}
         <div className="flex border-b border-slate-100 bg-slate-50/50 px-6">
           {tabs.map(tab => (
@@ -227,7 +218,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         </div>
 
         {/* Content Body */}
-        <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+        <div className="p-6 space-y-4">
           {/* TAB 1: 账号密码登录 */}
           {activeTab === 'login' && (
             <form onSubmit={handlePasswordLogin} className="space-y-4 text-xs">
@@ -463,6 +454,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 };
