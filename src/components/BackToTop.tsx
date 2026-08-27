@@ -39,12 +39,12 @@ export const BackToTop: React.FC<BackToTopProps> = ({ onOpenFeedback, showSugges
   return (
     // 全局悬浮：固定在主内容右侧（右下角偏上），所有页面始终存在、不随内容滚动
     <div className="fixed bottom-24 right-6 z-40 flex flex-col gap-2.5 items-center">
-      {/* 建议反馈悬浮按钮（全员可见）——竖向文字样式 */}
+      {/* 建议反馈悬浮按钮（全员可见）——竖向文字样式，宽度与返回顶部对齐 */}
       {showSuggestionButton && (
         <button
           onClick={onOpenFeedback}
           id="btn-floating-feedback"
-          className="flex flex-col items-center gap-2 px-2.5 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl hover:shadow-2xl hover:border-indigo-400 dark:hover:border-indigo-600 text-slate-700 dark:text-slate-200 text-xs font-semibold transition-all active:scale-95 group"
+          className="w-11 flex flex-col items-center gap-2 px-2.5 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl hover:shadow-2xl hover:border-indigo-400 dark:hover:border-indigo-600 text-slate-700 dark:text-slate-200 text-xs font-semibold transition-all active:scale-95 group"
           title="建议与反馈"
         >
           <MessageSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform" />
@@ -54,12 +54,12 @@ export const BackToTop: React.FC<BackToTopProps> = ({ onOpenFeedback, showSugges
         </button>
       )}
 
-      {/* Back to top with progress ring */}
+      {/* Back to top with progress ring ——白色主题，与建议反馈一致 */}
       {visible && (
         <button
           onClick={scrollToTop}
           id="btn-back-to-top"
-          className="relative flex items-center justify-center w-11 h-11 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-xl hover:shadow-2xl transition-all active:scale-90 animate-in fade-in slide-in-from-bottom-2 duration-200"
+          className="relative flex items-center justify-center w-11 h-11 rounded-2xl bg-white border border-slate-200 text-slate-700 hover:border-indigo-400 hover:text-indigo-600 shadow-xl hover:shadow-2xl transition-all active:scale-90 animate-in fade-in slide-in-from-bottom-2 duration-200 group"
           title="返回顶部"
         >
           <ChevronUp className="w-5 h-5" />
