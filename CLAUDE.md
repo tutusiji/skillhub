@@ -145,6 +145,18 @@ Refreshing on `/skill/:slug` may find the skill only on the server. `selectedSki
 ### fileTree content vs zipBlob
 `createSkill` stores the frontend-provided `fileTree` (which includes text `content` for the detail-page file preview) **in preference to** parsing the uploaded ZIP for structure — the parser produces no `content`, so overriding with it would blank the preview. The original ZIP itself lives on `skills.zip_blob` (base64) + `zip_file_name`, powering lossless download and Git publish. When adding fields to `SkillEntity`, remember `fileTree` / `installCommands` / `auditScore` etc. are camelCase columns (no `name:` mapping).
 
+**列表接口不返回 `fileTree`（重要）。** `LIST_SKILL_COLUMNS` in `skills.service.ts` whitelists the columns `GET /api/v1/skills` selects and deliberately omits `fileTree` and `zipBlob` (the list response went from 27.7 MB to 37.5 KB). Consequence: **anything that needs source code must fetch the detail endpoint `GET /api/v1/skills/:slug` on demand** — a skill object coming from the list has an empty `fileTree`. The two consumers already do this:
+
+- `App.tsx` `handleOpenSkillDetail` is `async`: if the skill already carries `content` it navigates straight away; otherwise it sets `detailLoading`, `await api.getSkill(slug)`, writes the full object back into `skills`, and only then `navigate('detail', full)` — so the detail page never paints an empty code tree. Offline/backend failure falls back to opening with the slim list data (metadata is still useful).
+- `AuditManagementView` runs an effect keyed on `inspectingSkill?.id`: when the inspected skill has no file content it fetches the detail and merges `fileTree` / `readme` / `installCommands` back, guarded by a `cancelled` flag and an `id` equality check so a stale response cannot overwrite a newly selected skill. `detailLoadingId` drives the loading hints in the files tab; the empty state distinguishes "still loading" from "this skill genuinely has no tree".
+
+Do not "optimise" this by re-adding `fileTree` to the list columns — it is the single biggest payload regression this project has had.
+
+### Modals: shared component, ESC and fixed height
+Use `src/components/Modal.tsx` for new dialogs; it owns enter/leave transitions (200 ms, unmount is deferred so the leave animation plays), body scroll locking, backdrop click and `closeOnEscape` (default `true`). For panels that are **not** built on `Modal` (the audit inspector layer, the expert-group form layer) wire up `src/hooks/useEscapeKey.ts` — pass a memoised `onClose` (the hook re-binds when the callback identity changes). `PopconfirmBubble` and `CommandPaletteModal` have their own ESC handling and need neither.
+
+Route every close path through one function. The audit inspector's `closeInspector` resets `inspectingSkill`, `detailLoadingId`, the reject input and the active tab, and the header ✕ calls the same function — two divergent close paths were how stale loading state leaked into the next open. The inspector shell is `h-[min(820px,92vh)]` (not `max-h-`) with `min-h-0` on the scroll container, so switching tabs does not make the dialog jump.
+
 ## Deployment
 
 `deploy/README.md` has the details. In short: `server/src/main.ts` serves `../dist` (static + SPA history fallback) when it exists, so production is a **single process** on `:3001` — no Vite. The fallback middleware must be registered with `app.use()` **before** `listen()`; adding routes after `listen()` has no effect on Express 4. `deploy/skillhub-server.service` is a systemd **user** unit (`Restart=always`, linger enabled); frp's `skillhub` proxy must point at 3001, not Vite's 7001.
