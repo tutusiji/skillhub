@@ -67,7 +67,9 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
   const [showRejectInput, setShowRejectInput] = useState(false);
 
   // Inspector modal tab
-  const [modalTab, setModalTab] = useState<'audit' | 'files' | 'readme'>('audit');
+  // 默认打开使用文档（README），与新的 tab 顺序一致；closeInspector 同样重置为 readme，
+  // 这样下一次打开审核工作台时也是从 README 起步。
+  const [modalTab, setModalTab] = useState<'readme' | 'files' | 'audit'>('readme');
 
   /**
    * 详情补全状态：列表接口 (LIST_SKILL_COLUMNS) 显式不返回 fileTree，
@@ -121,7 +123,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
     setInspectingSkill(null);
     setDetailLoadingId(null);
     setShowRejectInput(false);
-    setModalTab('audit');
+    setModalTab('readme');
   }, []);
   useEscapeKey(closeInspector, inspectingSkill !== null);
 
@@ -530,7 +532,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="relative w-full max-w-5xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col h-[min(820px,92vh)]"
+            className="relative w-full max-w-5xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col h-[min(720px,90vh)]"
           >
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
@@ -559,15 +561,15 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
             {/* Modal Tabs */}
             <div className="flex items-center gap-2 px-5 border-b border-slate-200 bg-white shrink-0">
               <button
-                onClick={() => setModalTab('audit')}
+                onClick={() => setModalTab('readme')}
                 className={`py-3 px-3 border-b-2 text-xs font-bold flex items-center gap-1.5 transition-colors ${
-                  modalTab === 'audit'
+                  modalTab === 'readme'
                     ? 'border-indigo-600 text-indigo-600'
                     : 'border-transparent text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <ShieldCheck className="w-4 h-4" />
-                <span>双引擎安全体检报告 ({inspectingSkill.auditResults.score}分)</span>
+                <FileText className="w-4 h-4" />
+                <span>使用文档 (README)</span>
               </button>
 
               <button
@@ -583,15 +585,15 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
               </button>
 
               <button
-                onClick={() => setModalTab('readme')}
+                onClick={() => setModalTab('audit')}
                 className={`py-3 px-3 border-b-2 text-xs font-bold flex items-center gap-1.5 transition-colors ${
-                  modalTab === 'readme'
+                  modalTab === 'audit'
                     ? 'border-indigo-600 text-indigo-600'
                     : 'border-transparent text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <FileText className="w-4 h-4" />
-                <span>使用文档 (README)</span>
+                <ShieldCheck className="w-4 h-4" />
+                <span>双引擎安全体检报告 ({inspectingSkill.auditResults.score}分)</span>
               </button>
             </div>
 
