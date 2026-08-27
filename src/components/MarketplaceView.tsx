@@ -346,19 +346,9 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
                     <span>⭐ {skill.stars}</span>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={(e) => handleCopyCmd(e, skill)}
-                      className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-700 text-[11px] font-bold transition-all flex items-center gap-1"
-                      title="复制 Claude 安装命令"
-                    >
-                      {copiedId === skill.id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                      <span>{copiedId === skill.id ? '已复制' : '复制命令'}</span>
-                    </button>
-                    <span className="text-indigo-600 group-hover:translate-x-0.5 transition-transform font-bold text-xs flex items-center">
-                      详情 →
-                    </span>
-                  </div>
+                  <span className="text-indigo-600 group-hover:translate-x-0.5 transition-transform font-bold text-xs flex items-center">
+                    详情 →
+                  </span>
                 </div>
               </div>
             );
