@@ -32,6 +32,7 @@ import { executeDualEngineAudit } from './utils/auditRunner';
 import { api, mapApiDemand, mapApiFeedback, mapApiSkill, mapApiUser, mapAuditRule, syncToBackend } from './services/api';
 import { FeedbackAdminView } from './components/FeedbackAdminView';
 import { CategoryAndDomainView } from './components/CategoryAndDomainView';
+import { ExpertDomainsProvider } from './contexts/ExpertDomainsContext';
 
 /** 普通 tab → 路径映射（不含 detail，detail 走 /skill/:slug） */
 const TAB_PATHS: Record<string, string> = {
@@ -1180,7 +1181,8 @@ export default function App() {
     isSuperAdmin || (currentUser?.role === 'admin' && menuPermissions.includes('rules'));
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
+    <ExpertDomainsProvider>
+      <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
       {/* Intranet Navbar with RBAC & Auth */}
       <Header
         currentTab={currentTab}
@@ -1700,6 +1702,7 @@ export default function App() {
 
       {/* 9. Toast Alerts */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
-    </div>
+      </div>
+    </ExpertDomainsProvider>
   );
 }
