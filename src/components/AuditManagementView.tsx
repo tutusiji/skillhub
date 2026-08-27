@@ -62,6 +62,9 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
   const [isScanningId, setIsScanningId] = useState<string | null>(null);
   const [scanProgressText, setScanProgressText] = useState('');
 
+  // [diagnostic] 确认浏览器拿到的是 f7a6808+ 的代码
+  console.log('[AuditManagementView] loaded', { build: 'tab-reorder-2026-08-27', modalTabInitial: 'readme' });
+
   // Rejection feedback state in modal
   const [rejectFeedback, setRejectFeedback] = useState('');
   const [showRejectInput, setShowRejectInput] = useState(false);
@@ -236,6 +239,14 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
+      {/* [diagnostic] 浏览器缓存验证条：硬刷页面应该看到这条横幅；
+          看不到就说明浏览器拿到的还是旧 module。 */}
+      <div
+        data-build-tag="tab-reorder-2026-08-27"
+        style={{ background: '#fef2f2', border: '2px dashed #ef4444', padding: '8px 14px', borderRadius: 10, fontSize: 12, fontWeight: 700, color: '#991b1b' }}
+      >
+        🛠 DIAGNOSTIC BUILD: f7a6808 + tab-reorder patch — 如果你看到这条横幅，说明浏览器拿到了新代码。console 里也应同时看到 [AuditManagementView] loaded 标记。
+      </div>
       {/* Header Card */}
       <div className="p-6 sm:p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-gradient-to-bl from-purple-50 via-indigo-50 to-transparent rounded-full blur-2xl pointer-events-none" />
