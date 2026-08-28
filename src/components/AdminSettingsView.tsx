@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Shield,
   ShieldCheck,
@@ -18,6 +18,9 @@ import {
   ClipboardCheck,
   MessageSquarePlus,
   Tags,
+  ChevronLeft,
+  ChevronRight,
+  X,
 } from 'lucide-react';
 import { UserAccount, UserRole } from '../types';
 import { PopconfirmBubble } from './PopconfirmBubble';
@@ -91,6 +94,9 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   // 默认选中「管理员」角色筛选
   const [roleFilter, setRoleFilter] = useState<'all' | 'super_admin' | 'admin' | 'user'>('admin');
+  // 分页：每页 20 条
+  const PAGE_SIZE = 20;
+  const [currentPage, setCurrentPage] = useState(1);
 
   const isSuperAdmin = currentUser?.role === 'super_admin';
 
@@ -131,6 +137,17 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
       return true;
     });
   }, [users, searchQuery, roleFilter]);
+
+  // 总页数（结果变化时自动重置到第 1 页，避免停留在越界页）
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / PAGE_SIZE));
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, roleFilter, users]);
+  // 当前页条目
+  const pagedUsers = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredUsers.slice(start, start + PAGE_SIZE);
+  }, [filteredUsers, currentPage]);
 
   /**
    * 左栏全局菜单权限开关：勾选/取消对所有管理员生效
@@ -310,21 +327,45 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
         {/* RIGHT: 用户列表 */}
         <div className="lg:col-span-9 space-y-4">
           {/* Filter and User Search Toolbar */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs">
-            {/* Search by User ID or Name */}
-            <div className="relative w-full sm:w-96">
-              <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="搜索工号、姓名、邮箱、部门..."
-                className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs text-slate-800"
-              />
+          <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-3.5">
+            {/* 快速搜索条 - 更显眼 */}
+            <div className="flex flex-col md:flex-row md:items-center gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="快速搜索：工号 / 姓名 / 邮箱 / 部门"
+                  className="w-full pl-11 pr-10 py-3 rounded-2xl border-2 border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm text-slate-900 placeholder-slate-400 transition-all font-medium"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors"
+                    title="清空搜索"
+                    aria-label="清空搜索"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* 实时匹配数提示 */}
+              <div className={`shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border ${
+                searchQuery.trim()
+                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                  : 'bg-slate-50 text-slate-500 border-slate-200'
+              }`}>
+                <Search className="w-3.5 h-3.5" />
+                <span>
+                  匹配 <span className="font-black">{filteredUsers.length}</span> 位用户
+                </span>
+              </div>
             </div>
 
-            {/* Role Filter Tabs */}
-            <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
+            {/* 角色筛选 Tabs */}
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-xs text-slate-400 mr-1">角色筛选：</span>
               {[
                 { id: 'all', label: '全部用户' },
@@ -367,7 +408,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
               <div>未找到匹配的用户，请尝试更换搜索关键字或用户 ID。</div>
             </div>
           ) : (
-            filteredUsers.map(user => {
+            pagedUsers.map(user => {
               const isSelf = user.id === currentUser?.id;
               const isSuper = user.role === 'super_admin';
               const isAdminUser = user.role === 'admin';
@@ -512,6 +553,78 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
             })
           )}
         </div>
+
+        {/* 分页控件：每页 {PAGE_SIZE} 条 */}
+        {filteredUsers.length > 0 && (
+          <div className="px-5 py-3.5 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/40">
+            <div className="text-xs text-slate-500 font-medium">
+              第 <span className="font-black text-slate-900">{(currentPage - 1) * PAGE_SIZE + 1}</span>–
+              <span className="font-black text-slate-900">{Math.min(currentPage * PAGE_SIZE, filteredUsers.length)}</span> 条 / 共
+              <span className="font-black text-slate-900"> {filteredUsers.length} </span>条
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                上一页
+              </button>
+
+              <div className="flex items-center gap-1">
+                {(() => {
+                  /*
+                   * 页码序列：首页 + 当前页 ±1 + 末页，中间断档处补省略号。
+                   * 先算出要显示的页码集合再统一插省略号，比在循环里边走边判断更不容易出错
+                   * （之前的写法只在 i === 2 时插入前置省略号，而当前页右移后循环根本不会
+                   * 经过 2，导致 cur=5/last=10 渲染成「1 4 5 6 … 10」，1 和 4 之间缺省略号）。
+                   */
+                  const last = totalPages;
+                  const cur = currentPage;
+                  const numbers = new Set<number>([1, last]);
+                  for (let i = cur - 1; i <= cur + 1; i++) {
+                    if (i >= 1 && i <= last) numbers.add(i);
+                  }
+                  const sorted = [...numbers].sort((a, b) => a - b);
+                  const pages: (number | 'ellipsis')[] = [];
+                  sorted.forEach((n, i) => {
+                    // 与上一个页码不连续说明中间有断档，补一个省略号
+                    if (i > 0 && n - sorted[i - 1] > 1) pages.push('ellipsis');
+                    pages.push(n);
+                  });
+                  return pages.map((p, idx) =>
+                    p === 'ellipsis' ? (
+                      <span key={`e-${idx}`} className="px-1.5 text-xs text-slate-400">…</span>
+                    ) : (
+                      <button
+                        key={p}
+                        onClick={() => setCurrentPage(p)}
+                        className={`min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold transition-all ${
+                          currentPage === p
+                            ? 'bg-indigo-600 text-white shadow-2xs'
+                            : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  );
+                })()}
+              </div>
+
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                下一页
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
         </div>
         </div>
       </div>
