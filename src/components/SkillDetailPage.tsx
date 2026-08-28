@@ -30,6 +30,7 @@ import { SkillItem } from '../types';
 import { FileTreeViewer } from './FileTreeViewer';
 import { AuditReportInspector } from './AuditReportInspector';
 import { getMarketplaceAddCommand, getMarketplaceUpdateCommand } from '../utils/marketplace';
+import { Avatar } from './Avatar';
 
 interface SkillDetailPageProps {
   skill: SkillItem;
@@ -206,10 +207,10 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
           {/* Author & Stats Row */}
           <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-slate-100 text-xs">
             <div className="flex items-center gap-3">
-              <img
+              <Avatar
                 src={skill.author.avatar}
-                alt={skill.author.name}
-                className="w-9 h-9 rounded-full object-cover border border-slate-200 shadow-2xs"
+                name={skill.author.name}
+                className="w-9 h-9 rounded-full border border-slate-200 shadow-2xs"
               />
               <div>
                 <div className="flex items-center gap-1.5">

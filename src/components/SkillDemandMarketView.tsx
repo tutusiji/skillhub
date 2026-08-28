@@ -27,6 +27,7 @@ import { SkillDemand, UserAccount, ExpertDomain, SkillItem } from '../types';
 import { EXPERT_DOMAINS, getExpertDomainMeta } from '../data/expertDomains';
 import { useExpertDomains } from '../hooks/useExpertDomains';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { Avatar } from './Avatar';
 
 interface SkillDemandMarketViewProps {
   demands: SkillDemand[];
@@ -408,10 +409,10 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
                   {/* Author & Footer Actions */}
                   <div className="flex items-center justify-between pt-1">
                     <div className="flex items-center gap-2 min-w-0">
-                      <img
+                      <Avatar
                         src={demand.author.avatar}
-                        alt={demand.author.name}
-                        className="w-6 h-6 rounded-full object-cover border border-slate-200 shrink-0"
+                        name={demand.author.name}
+                        className="w-6 h-6 rounded-full border border-slate-200 shrink-0"
                       />
                       <div className="truncate">
                         <span className="text-xs font-bold text-slate-700 truncate block">
@@ -537,10 +538,10 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
                       {/* Author */}
                       <td className="py-3.5 px-4 max-w-[160px]">
                         <div className="flex items-center gap-2 min-w-0">
-                          <img
+                          <Avatar
                             src={demand.author.avatar}
-                            alt={demand.author.name}
-                            className="w-5 h-5 rounded-full object-cover border border-slate-200 shrink-0"
+                            name={demand.author.name}
+                            className="w-5 h-5 rounded-full border border-slate-200 shrink-0"
                           />
                           <div className="truncate">
                             <div className="font-bold text-slate-700 truncate">

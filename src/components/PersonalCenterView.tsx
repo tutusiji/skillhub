@@ -36,6 +36,7 @@ import { getExpertDomainMeta } from '../data/expertDomains';
 import { isOwnSubmission } from '../utils/skillOwnership';
 import { useExpertDomains } from '../hooks/useExpertDomains';
 import { PopconfirmBubble } from './PopconfirmBubble';
+import { Avatar } from './Avatar';
 
 interface PersonalCenterViewProps {
   currentUser: UserAccount | null;
@@ -176,10 +177,10 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
         <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="flex items-center gap-4">
             <div className="relative group">
-              <img
+              <Avatar
                 src={currentUser.avatar}
-                alt={currentUser.name}
-                className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 border-indigo-100 shadow-md bg-white"
+                name={currentUser.name}
+                className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border-2 border-indigo-100 shadow-md bg-white"
               />
               <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 border-2 border-white rounded-full flex items-center justify-center" title="在线">
                 <span className="w-1.5 h-1.5 bg-white rounded-full" />

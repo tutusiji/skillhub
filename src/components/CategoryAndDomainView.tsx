@@ -20,6 +20,7 @@ import { api, ExpertDomainPayload } from '../services/api';
 import { useExpertDomains } from '../hooks/useExpertDomains';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { PopconfirmBubble } from './PopconfirmBubble';
+import { Avatar } from './Avatar';
 
 interface CategoryAndDomainViewProps {
   currentUser: UserAccount;
@@ -451,7 +452,7 @@ export const CategoryAndDomainView: React.FC<CategoryAndDomainViewProps> = ({
                         <div className="space-y-1.5 max-h-56 overflow-y-auto">
                           {members.map(skill => (
                             <div key={skill.id} className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors">
-                              <img src={skill.author.avatar} alt="" className="w-6 h-6 rounded-lg object-cover shrink-0" />
+                              <Avatar src={skill.author.avatar} name={skill.author.name} className="w-6 h-6 rounded-lg shrink-0" />
                               <div className="min-w-0 flex-1">
                                 <div className="text-xs font-bold text-slate-800 truncate">{skill.name}</div>
                                 <div className="text-[10px] font-mono text-slate-400 truncate">{skill.slug}</div>
@@ -502,7 +503,7 @@ export const CategoryAndDomainView: React.FC<CategoryAndDomainViewProps> = ({
                                 disabled={savingDomains.includes(skill.id)}
                                 className="w-full flex items-center gap-2 p-2 rounded-xl bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/60 text-left transition-all disabled:opacity-50"
                               >
-                                <img src={skill.author.avatar} alt="" className="w-6 h-6 rounded-lg object-cover shrink-0" />
+                                <Avatar src={skill.author.avatar} name={skill.author.name} className="w-6 h-6 rounded-lg shrink-0" />
                                 <div className="min-w-0 flex-1">
                                   <div className="text-xs font-bold text-slate-800 truncate">{skill.name}</div>
                                   <div className="text-[10px] font-mono text-slate-400 truncate">{skill.slug}</div>

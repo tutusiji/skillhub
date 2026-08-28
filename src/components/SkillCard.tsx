@@ -15,6 +15,7 @@ import confetti from 'canvas-confetti';
 import { SkillItem } from '../types';
 import { getExpertDomainMeta } from '../data/expertDomains';
 import { useExpertDomains } from '../hooks/useExpertDomains';
+import { Avatar } from './Avatar';
 
 interface SkillCardProps {
   skill: SkillItem;
@@ -163,10 +164,10 @@ export const SkillCard: React.FC<SkillCardProps> = ({
         {/* Author and stats */}
         <div className="flex items-center justify-between text-xs">
           <div className="flex items-center gap-2 min-w-0">
-            <img
+            <Avatar
               src={skill.author.avatar}
-              alt={skill.author.name}
-              className="w-6 h-6 rounded-full object-cover border border-slate-200"
+              name={skill.author.name}
+              className="w-6 h-6 rounded-full border border-slate-200"
             />
             <div className="text-xs text-slate-700 font-medium truncate">
               {skill.author.name.split(' ')[0]}

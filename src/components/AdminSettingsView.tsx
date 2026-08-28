@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { UserAccount, UserRole } from '../types';
 import { PopconfirmBubble } from './PopconfirmBubble';
+import { Avatar } from './Avatar';
 
 interface AdminSettingsViewProps {
   currentUser: UserAccount | null;
@@ -347,10 +348,10 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 >
                   {/* User Profile */}
                   <div className="flex items-center gap-3.5 min-w-0">
-                    <img
+                    <Avatar
                       src={user.avatar}
-                      alt={user.name}
-                      className="w-11 h-11 rounded-2xl object-cover border border-slate-200 shrink-0"
+                      name={user.name}
+                      className="w-11 h-11 rounded-2xl border border-slate-200 shrink-0"
                     />
                     <div className="space-y-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">

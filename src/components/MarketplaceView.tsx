@@ -39,6 +39,7 @@ import { SkillCard } from './SkillCard';
 import { EXPERT_DOMAINS, getExpertDomainMeta } from '../data/expertDomains';
 import { api } from '../services/api';
 import { useExpertDomains } from '../hooks/useExpertDomains';
+import { Avatar } from './Avatar';
 
 interface MarketplaceViewProps {
   skills: SkillItem[];
@@ -706,10 +707,10 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
                         {/* Author */}
                         <td className="py-3.5 px-4 whitespace-nowrap">
                           <div className="flex items-center gap-1.5">
-                            <img
+                            <Avatar
                               src={skill.author.avatar}
-                              alt={skill.author.name}
-                              className="w-5 h-5 rounded-full object-cover border border-slate-200"
+                              name={skill.author.name}
+                              className="w-5 h-5 rounded-full border border-slate-200"
                             />
                             <span className="text-slate-700 text-xs truncate max-w-[100px]">{skill.author.name}</span>
                           </div>

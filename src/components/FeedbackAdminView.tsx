@@ -11,6 +11,7 @@ import {
 import { FeedbackItem, UserAccount } from '../types';
 import { PopconfirmBubble } from './PopconfirmBubble';
 import { resolveAvatar } from '../utils/avatar';
+import { Avatar } from './Avatar';
 
 interface FeedbackAdminViewProps {
   currentUser: UserAccount;
@@ -133,13 +134,13 @@ export const FeedbackAdminView: React.FC<FeedbackAdminViewProps> = ({
               return (
                 <div key={item.id} className="p-4 sm:p-5 hover:bg-slate-50/80 transition-colors">
                   <div className="flex items-start gap-3.5">
-                    <img
+                    <Avatar
                       src={resolveAvatar(item.submitterAvatar, {
                         employeeId: item.submitterEmployeeId,
                         name: item.userName,
                       })}
-                      alt={item.userName}
-                      className="w-10 h-10 rounded-xl object-cover border border-slate-200 shrink-0"
+                      name={item.userName}
+                      className="w-10 h-10 rounded-xl border border-slate-200 shrink-0"
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">

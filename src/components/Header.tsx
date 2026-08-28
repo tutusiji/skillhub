@@ -23,6 +23,7 @@ import {
   Tags
 } from 'lucide-react';
 import { UserAccount } from '../types';
+import { Avatar } from './Avatar';
 
 export type NavigationTab = 'market' | 'demands' | 'personal' | 'audit' | 'rules' | 'settings' | 'feedback' | 'manage' | 'detail';
 
@@ -229,10 +230,10 @@ export const Header: React.FC<HeaderProps> = ({
                 id="btn-user-profile-menu"
                 className="flex items-center gap-2 p-1.5 rounded-2xl hover:bg-slate-100 transition-colors border border-transparent hover:border-slate-200"
               >
-                <img
+                <Avatar
                   src={currentUser.avatar}
-                  alt={currentUser.name}
-                  className="w-8 h-8 rounded-xl object-cover border border-slate-200 shadow-2xs"
+                  name={currentUser.name}
+                  className="w-8 h-8 rounded-xl border border-slate-200 shadow-2xs"
                 />
                 <div className="hidden xl:block text-left">
                   <div className="text-xs font-bold text-slate-900 truncate max-w-[110px]">
@@ -253,10 +254,10 @@ export const Header: React.FC<HeaderProps> = ({
                   {/* User Card Header */}
                   <div className="p-3 bg-gradient-to-br from-slate-50 to-indigo-50/50 rounded-2xl border border-slate-100 space-y-2">
                     <div className="flex items-center gap-3">
-                      <img
+                      <Avatar
                         src={currentUser.avatar}
-                        alt={currentUser.name}
-                        className="w-10 h-10 rounded-xl object-cover border border-slate-200"
+                        name={currentUser.name}
+                        className="w-10 h-10 rounded-xl border border-slate-200"
                       />
                       <div className="min-w-0 flex-1">
                         <div className="font-bold text-slate-900 truncate">{currentUser.name}</div>

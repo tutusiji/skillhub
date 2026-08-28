@@ -24,6 +24,7 @@ import { getExpertDomainMeta } from '../data/expertDomains';
 import { useExpertDomains } from '../hooks/useExpertDomains';
 import { PopconfirmBubble } from './PopconfirmBubble';
 import { Modal } from './Modal';
+import { Avatar } from './Avatar';
 
 interface SkillDemandDetailModalProps {
   demand: SkillDemand | null;
@@ -218,10 +219,10 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
         {/* Author info card */}
         <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <img
+            <Avatar
               src={demand.author.avatar}
-              alt={demand.author.name}
-              className="w-10 h-10 rounded-full object-cover border border-slate-200"
+              name={demand.author.name}
+              className="w-10 h-10 rounded-full border border-slate-200"
             />
             <div>
               <div className="text-xs font-bold text-slate-800">{demand.author.name}</div>
@@ -344,10 +345,10 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
                   }`}
                 >
                   <div className="flex items-center gap-2.5 flex-wrap">
-                    <img
+                    <Avatar
                       src={candidate.submitterAvatar}
-                      alt={candidate.submitterName}
-                      className="w-7 h-7 rounded-full object-cover border border-slate-200"
+                      name={candidate.submitterName}
+                      className="w-7 h-7 rounded-full border border-slate-200"
                     />
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-slate-800 truncate">
