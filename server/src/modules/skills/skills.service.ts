@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   OnModuleInit,
@@ -208,6 +209,14 @@ export class SkillsService implements OnModuleInit {
 
   /**
    * 获取技能列表（支持分类、状态和关键词过滤）
+   *
+   * 可见性收敛：
+   *   - 管理员（admin/super_admin）看全部
+   *   - 提交者本人看"已上架 + 自己提交的"（含 pending / rejected / archived）
+   *   - 普通匿名访客只看已上架
+   *   - 默认隐藏 archived（被新版替代的旧版本），只有 owner/admin 显式传
+   *     includeArchived=true 才返回
+   *
    * @param query 查询参数对象
    */
   async findAll(
@@ -215,6 +224,7 @@ export class SkillsService implements OnModuleInit {
       category?: string;
       status?: string;
       search?: string;
+      includeArchived?: boolean;
     },
     viewer?: { id: string; role: string } | null,
   ): Promise<SkillEntity[]> {
@@ -247,6 +257,12 @@ export class SkillsService implements OnModuleInit {
       );
     }
 
+    // archived 默认隐藏（被新版替代的旧版本），仅 owner/admin 显式开启才返回
+    const canSeeArchived = isPrivileged || !!viewer?.id;
+    if (!query.includeArchived || !canSeeArchived) {
+      skills = skills.filter((s) => s.status !== 'archived');
+    }
+
     if (query.search) {
       const s = query.search.toLowerCase();
       skills = skills.filter(
@@ -262,11 +278,18 @@ export class SkillsService implements OnModuleInit {
 
   /**
    * 根据 Slug 或 ID 查询技能详情
+   *
+   * 可见性：
+   *   - 已上架技能对所有人开放
+   *   - 未上架技能对管理员和提交者本人开放（其他人返回 404 避免泄露存在性）
+   *   - archived（被新版替代的旧版本）只对 owner / admin 开放（通过 ?includeArchived=true）
+   *
    * @param slugOrId Slug 标识或 UUID
    */
   async findBySlug(
     slugOrId: string,
     viewer?: { id: string; role: string } | null,
+    options: { includeArchived?: boolean } = {},
   ): Promise<SkillEntity> {
     const clean = slugOrId.startsWith('@') ? slugOrId : `@skillhub/${slugOrId}`;
     const skill = await this.skillRepository.findOne({
@@ -287,7 +310,79 @@ export class SkillsService implements OnModuleInit {
     if (skill.status !== 'approved' && !isPrivileged && !isOwner) {
       throw new NotFoundException(`未找到指定技能: ${slugOrId}`);
     }
+
+    // archived 默认对外隐藏；只有 owner/admin 显式传 includeArchived=true 才返回
+    if (
+      skill.status === 'archived' &&
+      !options.includeArchived &&
+      !isPrivileged &&
+      !isOwner
+    ) {
+      throw new NotFoundException(`未找到指定技能: ${slugOrId}`);
+    }
     return skill;
+  }
+
+  /**
+   * 查询技能的所有版本（版本链）
+   *
+   * 沿 parent_skill_id 链回溯到根，再把所有同链上的技能按时间倒序列出。
+   * 同样按 owner/admin 限权：archived 版本只对 owner/admin 可见。
+   *
+   * @param rootId 链上任意一节点（通常是当前已上架的最新版）
+   * @param viewer 当前查看者
+   * @returns 完整版本链（含 status 标签）
+   */
+  async findVersions(
+    rootId: string,
+    viewer?: { id: string; role: string } | null,
+  ): Promise<SkillEntity[]> {
+    // 1. 先顺 parent 链回溯到根（最旧版本）
+    let cursor: SkillEntity | null = await this.skillRepository.findOne({
+      where: { id: rootId },
+    });
+    if (!cursor) throw new NotFoundException(`未找到指定技能: ${rootId}`);
+
+    while (cursor?.parentSkillId) {
+      const parent: SkillEntity | null = await this.skillRepository.findOne({
+        where: { id: cursor.parentSkillId },
+      });
+      if (!parent) break;
+      cursor = parent;
+    }
+    const root = cursor;
+    if (!root) throw new NotFoundException(`未找到指定技能: ${rootId}`);
+
+    // 2. 从根向下收集所有子版本（按 createdAt 升序）
+    const versions: SkillEntity[] = [root];
+    let frontier: SkillEntity[] = [root];
+    while (frontier.length > 0) {
+      const ids = frontier.map((v) => v.id);
+      const children = await this.skillRepository
+        .createQueryBuilder('s')
+        .where('s.parent_skill_id IN (:...ids)', { ids })
+        .orderBy('s.createdAt', 'ASC')
+        .getMany();
+      if (children.length === 0) break;
+      versions.push(...children);
+      frontier = children;
+    }
+
+    // 3. 按 createdAt 倒序：最新版在前
+    versions.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+
+    // 4. 可见性收敛：archived 只对 owner/admin 可见
+    const isPrivileged =
+      viewer?.role === 'admin' || viewer?.role === 'super_admin';
+    const filtered = versions.filter((v) => {
+      if (v.status !== 'archived') return true;
+      return isPrivileged || (!!viewer?.id && v.submitterId === viewer.id);
+    });
+
+    return filtered.map((v) => this.stripZipBlob(v));
   }
 
   /**
@@ -395,6 +490,14 @@ export class SkillsService implements OnModuleInit {
 
   /**
    * 上传并创建新技能 (持久化入库并根据扫描结果同步 Git)
+   *
+   * 多版本发布支持（Phase 3）：
+   *   - 不传 parentSkillId → 全新技能，status=pending
+   *   - 传 parentSkillId + supersedeMode='coexist' → 新版独立计 counter，parent 不动
+   *   - 传 parentSkillId + supersedeMode='replace' → 新版从 parent 继承 counter 起点
+   *     （parent.likes 复制到 new.likes；parent 后续不重置，archived 后冻结）
+   *
+   * 守卫：parent 必须存在 + 同一提交者；该 parent 若已有 pending 子版，禁止再排队新版本
    * @param payload 技能表单数据
    */
   async createSkill(payload: {
@@ -418,12 +521,44 @@ export class SkillsService implements OnModuleInit {
     zipBuffer?: Buffer | string;
     /** 上传时的原始 ZIP 文件名（下载与展示用） */
     zipFileName?: string;
+    /** 多版本发布：父版本 ID（指定则进入"发新版本"流程） */
+    parentSkillId?: string;
+    /** 多版本发布：父版本处理模式，'coexist'（默认）保留共存，'replace' 替代旧版 */
+    supersedeMode?: 'coexist' | 'replace';
   }): Promise<SkillEntity> {
     if (!payload?.name?.trim()) {
       throw new BadRequestException('技能名称为必填项');
     }
     if (!payload?.description?.trim()) {
       throw new BadRequestException('技能简介为必填项');
+    }
+
+    // 父版本校验（多版本发布前置检查）
+    let parent: SkillEntity | null = null;
+    if (payload.parentSkillId) {
+      parent = await this.skillRepository.findOne({
+        where: { id: payload.parentSkillId },
+      });
+      if (!parent) {
+        throw new NotFoundException(
+          `未找到父版本技能: ${payload.parentSkillId}`,
+        );
+      }
+      // 必须由父版本的提交者本人发新版本，防止越权
+      if (parent.submitterId && parent.submitterId !== payload.submitterId) {
+        throw new ForbiddenException('仅原技能作者可发布该技能的新版本');
+      }
+      // 防堆积：若该父版本已有 pending 子版本，禁止再次排队
+      const pendingChild = await this.skillRepository
+        .createQueryBuilder('s')
+        .where('s.parent_skill_id = :pid', { pid: parent.id })
+        .andWhere("s.status = 'pending'")
+        .getOne();
+      if (pendingChild) {
+        throw new BadRequestException(
+          '该技能已有待审核的新版本，请先处理或驳回后再发布新版本',
+        );
+      }
     }
 
     // slug 允许省略：由技能名称自动派生，并保证全局唯一 (避免 UNIQUE 约束 500)
@@ -462,6 +597,15 @@ export class SkillsService implements OnModuleInit {
 
     const scanResult = await this.auditService.runDualEngineScan(scanPayload);
 
+    // "替代旧版"模式：counter 起点从父版本继承（parent 后续不重置）
+    const inheritCounters =
+      payload.parentSkillId &&
+      (payload.supersedeMode || 'coexist') === 'replace' &&
+      parent;
+    const seedLikes = inheritCounters ? parent!.likes : 0;
+    const seedStars = inheritCounters ? parent!.stars : 0;
+    const seedDownloads = inheritCounters ? parent!.downloads : 0;
+
     const newSkill = this.skillRepository.create({
       id: `skill-${Date.now()}`,
       name: payload.name,
@@ -484,9 +628,10 @@ export class SkillsService implements OnModuleInit {
       tags: payload.tags?.length
         ? payload.tags
         : ['AI技能', payload.category],
-      downloads: 0,
-      likes: 0,
-      stars: 0,
+      // 替代旧版模式下从父版本继承 counter 起点
+      downloads: seedDownloads,
+      likes: seedLikes,
+      stars: seedStars,
       permissions: payload.permissions || ['默认沙箱权限'],
       installCommands: {
         claude: `/plugin install ${cleanSlug}@skillhub`,
@@ -506,6 +651,11 @@ export class SkillsService implements OnModuleInit {
           : payload.zipBuffer.toString('base64')
         : null,
       zipFileName: payload.zipFileName?.trim() || null,
+      // 多版本发布：父版本关系（第一版为 null）+ 替代模式
+      parentSkillId: payload.parentSkillId || null,
+      supersedeMode: payload.parentSkillId
+        ? payload.supersedeMode || 'coexist'
+        : null,
     });
 
     const saved = await this.skillRepository.save(newSkill);
@@ -516,6 +666,12 @@ export class SkillsService implements OnModuleInit {
 
   /**
    * 管理员审核通过技能并自动提交发布至 Git 市场
+   *
+   * 多版本联动（Phase 4）：
+   *   - 'replace' 模式：父版本被自动 archive（status='archived'，superseded_by_id 指向新版）
+   *   - 'coexist' 模式：父版本保持 approved 不动（新版独立走 Git 发布，git 仓只保留最新版）
+   *   - 无 parent：原行为，单独通过
+   *
    * @param id 技能 ID
    */
   async approveSkill(
@@ -532,7 +688,25 @@ export class SkillsService implements OnModuleInit {
     skill.adminFeedback = feedback || '审核通过，准予在内网市场公开。';
 
     const updated = await this.skillRepository.save(skill);
+
+    // 'replace' 模式：把父版本 archive 掉，记录 supersede 关系
+    // 注意：counter 已在新版 create 时从父版本继承（Phase 3），此处不再累加
+    if (updated.parentSkillId && updated.supersedeMode === 'replace') {
+      await this.skillRepository
+        .createQueryBuilder()
+        .update(SkillEntity)
+        .set({
+          status: 'archived',
+          archivedAt: new Date().toISOString(),
+          supersededById: updated.id,
+        })
+        .where('id = :id', { id: updated.parentSkillId })
+        .andWhere("status != 'archived'")
+        .execute();
+    }
+
     // 用用户上传的原始 ZIP 写入 Git 市场，确保安装到的是真实技能内容而非模板空壳
+    // 即使 coexist 模式，git 仓也只保留最新版；旧版可通过 /skills/:id/zip 直接下载
     await this.gitMarketService.syncApprovedSkillToGit(
       updated,
       this.zipBufferOf(updated),
@@ -752,6 +926,93 @@ export class SkillsService implements OnModuleInit {
   }
 
   /**
+   * 管理员把已上架的技能回滚到指定的历史版本（仅 super_admin）
+   *
+   * 行为：
+   *   1. 当前 approved 版本 → status='archived', archived_at=NOW, superseded_by_id=target
+   *   2. target 版本 → status='approved', archived_at=NULL, superseded_by_id=NULL
+   *   3. 重新同步 Git 市场至 target（marketplace.json 的 version 字段切回 target）
+   *   4. counter 不重置：target 当时已有的 + 中间被归档期间累计的，都保留在 target 上
+   *
+   * 守卫：
+   *   - 当前必须有 approved 版本（不能"回滚到一个还没审核通过的版本"）
+   *   - target 必须在该技能链上（沿 parent_skill_id 可达）
+   *   - target 自身的 status 可以是 archived 或 rejected（管理员回滚可救活被驳回的）
+   *
+   * @param id 当前 approved 版本的 ID
+   * @param targetVersionId 目标历史版本 ID
+   */
+  async rollbackSkill(
+    id: string,
+    targetVersionId: string,
+  ): Promise<{ current: SkillEntity; target: SkillEntity }> {
+    if (!targetVersionId) {
+      throw new BadRequestException('targetVersionId 不能为空');
+    }
+
+    const current = await this.skillRepository.findOne({ where: { id } });
+    if (!current) throw new NotFoundException('未找到当前版本');
+    if (current.status !== 'approved') {
+      throw new BadRequestException(
+        `当前版本状态为 ${current.status}，仅已上架 (approved) 的技能可回滚`,
+      );
+    }
+
+    const target = await this.skillRepository.findOne({
+      where: { id: targetVersionId },
+    });
+    if (!target) throw new NotFoundException('未找到目标历史版本');
+
+    // target 必须在 current 的版本链上：沿 current.parent_skill_id 一直回溯，
+    // 任何一级命中 target 即认为在同一链
+    let cursor: SkillEntity | null = current;
+    let inChain = false;
+    while (cursor) {
+      if (cursor.id === target.id) {
+        inChain = true;
+        break;
+      }
+      if (!cursor.parentSkillId) break;
+      cursor = await this.skillRepository.findOne({
+        where: { id: cursor.parentSkillId },
+      });
+    }
+    if (!inChain) {
+      throw new BadRequestException(
+        '目标版本不在该技能的版本链上，不能回滚',
+      );
+    }
+    if (target.id === current.id) {
+      throw new BadRequestException('目标版本与当前版本相同，无需回滚');
+    }
+
+    // 1. 当前 → archived，指向 target
+    current.status = 'archived';
+    current.archivedAt = new Date().toISOString();
+    current.supersededById = target.id;
+    // 2. target → approved，清空它的反向指针
+    target.status = 'approved';
+    target.archivedAt = null;
+    target.supersededById = null;
+    target.reviewedBy = '系统管理员';
+    target.reviewedAt = new Date().toISOString();
+    target.adminFeedback = `由 v${current.version} 回滚至 v${target.version}`;
+
+    await this.skillRepository.save(current);
+    const savedTarget = await this.skillRepository.save(target);
+
+    // 3. 重新同步 Git 市场至 target 的版本
+    // 沿用 approveSkill 的写法：拿 target 的原始 ZIP 推到 git 仓
+    await this.gitMarketService.syncApprovedSkillToGit(
+      savedTarget,
+      this.zipBufferOf(savedTarget),
+      savedTarget.version,
+    );
+
+    return { current: this.stripZipBlob(current), target: this.stripZipBlob(savedTarget) };
+  }
+
+  /**
    * 维护技能的专家组归属（专家组即标签，一个技能可属于多个专家组）
    * @param id 技能 ID
    * @param domains 专家组 ID 清单
@@ -770,5 +1031,134 @@ export class SkillsService implements OnModuleInit {
       skill.expertDomain = clean[0];
     }
     return this.stripZipBlob(await this.skillRepository.save(skill));
+  }
+
+  /**
+   * 技能作者自更新元数据（不需要管理员参与）
+   *
+   * 支持修改的字段（白名单）：
+   *   - name          1-150 字符
+   *   - description   1-500 字符
+   *   - category      1-50 字符
+   *   - version       1-20 字符
+   *
+   * 守卫：
+   *   1. 必须是技能的提交者本人（防越权改别人的）
+   *   2. 状态不能是 rejected（驳回后需走重新提交）
+   *   3. 已上架 (approved) 的技能要改 version，必须同时带 newZipProvided=true
+   *      —— 防止用户随意虚标版本号
+   *
+   * 副作用：
+   *   - name 改了会重新派生 slug；旧 slug 仍可经 findBySlug 用 id 回查兼容
+   *   - 状态为 approved 时同步刷一次 Git 市场索引（仅 name/description，
+   *     zipBuffer 传 undefined 时 syncApprovedSkillToGit 不会重写文件内容）
+   *
+   * @param id 技能 ID
+   * @param operator 当前登录会话
+   * @param payload 待更新字段
+   */
+  async updateOwnMeta(
+    id: string,
+    operator: { id: string; name: string },
+    payload: {
+      name?: string;
+      description?: string;
+      category?: string;
+      version?: string;
+      /** 已 approved 的技能改 version 时必须为 true（前端「发布新版本」流程才会传） */
+      newZipProvided?: boolean;
+    },
+  ): Promise<SkillEntity> {
+    const skill = await this.skillRepository.findOne({ where: { id } });
+    if (!skill) throw new NotFoundException('未找到对应技能');
+
+    // 1. 提交者本人才能改自己的技能
+    if (skill.submitterId !== operator.id) {
+      throw new ForbiddenException('仅技能提交者本人可编辑该技能的元数据');
+    }
+
+    // 2. 驳回状态不允许直接编辑，必须走重新提交通道
+    if (skill.status === 'rejected') {
+      throw new BadRequestException(
+        '已驳回的技能不能直接编辑，请前往重新提交通道',
+      );
+    }
+
+    // 3. 字段白名单 + 长度校验
+    const updates: Partial<SkillEntity> = {};
+    if (payload.name !== undefined) {
+      const name = payload.name.trim();
+      if (!name) throw new BadRequestException('技能名称不能为空');
+      if (name.length > 150) {
+        throw new BadRequestException('技能名称不能超过 150 字符');
+      }
+      updates.name = name;
+    }
+    if (payload.description !== undefined) {
+      const description = payload.description.trim();
+      if (!description) throw new BadRequestException('技能简介不能为空');
+      if (description.length > 500) {
+        throw new BadRequestException('技能简介不能超过 500 字符');
+      }
+      updates.description = description;
+    }
+    if (payload.category !== undefined) {
+      const category = payload.category.trim();
+      if (!category) throw new BadRequestException('分类不能为空');
+      if (category.length > 50) {
+        throw new BadRequestException('分类不能超过 50 字符');
+      }
+      updates.category = category;
+    }
+    if (payload.version !== undefined) {
+      const version = payload.version.trim();
+      if (!version) throw new BadRequestException('版本号不能为空');
+      if (version.length > 20) {
+        throw new BadRequestException('版本号不能超过 20 字符');
+      }
+      // 已上架的技能要改 version 必须挂载新 ZIP（防止随意虚标版本号）
+      if (skill.status === 'approved' && !payload.newZipProvided) {
+        throw new BadRequestException(
+          '已上架技能的版本号变更需要同步上传新 ZIP 包，请使用「发布新版本」入口',
+        );
+      }
+      updates.version = version;
+    }
+
+    // 没有实际要改的字段直接返回当前状态，避免无效的 DB 写入
+    if (Object.keys(updates).length === 0) {
+      return this.stripZipBlob(skill);
+    }
+
+    // 4. name 改了要重新派生 slug，保持 slug 唯一性；旧 slug 仍可经 id 回查
+    if (updates.name && updates.name !== skill.name) {
+      const { fullSlug } = await this.resolveUniqueSlug(
+        skill.slug,
+        updates.name,
+      );
+      updates.slug = fullSlug;
+    }
+
+    Object.assign(skill, updates);
+    const saved = await this.skillRepository.save(skill);
+
+    // 5. 已上架的技能：同步刷一次 Git 市场索引（仅元数据，文件内容不动）
+    if (saved.status === 'approved' && (updates.name || updates.description)) {
+      try {
+        await this.gitMarketService.syncApprovedSkillToGit(
+          saved,
+          undefined,
+          saved.version,
+        );
+      } catch (error) {
+        // Git 同步失败不应阻断元数据保存——元数据已落库，下次启动自愈会补齐
+        console.warn(
+          `⚠️  技能 ${saved.slug} 元数据更新后 Git 同步失败（不影响主流程）:`,
+          (error as Error).message,
+        );
+      }
+    }
+
+    return this.stripZipBlob(saved);
   }
 }

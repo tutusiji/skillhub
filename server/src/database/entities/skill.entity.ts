@@ -4,6 +4,7 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm';
 
 /**
@@ -11,6 +12,7 @@ import {
  * 包含技能元数据、多端客户端支持、文件树快照与多端安装命令
  */
 @Entity('skills')
+@Index('idx_skills_submitter_status', ['submitterId', 'status'])
 export class SkillEntity {
   /** 技能唯一主键 ID (例如 skill-1) */
   @PrimaryColumn({ length: 64 })
@@ -139,6 +141,39 @@ export class SkillEntity {
   /** 管理员审核意见与驳回理由 */
   @Column({ name: 'admin_feedback', type: 'text', nullable: true })
   adminFeedback: string;
+
+  /**
+   * 版本关系：当前版本指向其前驱版本（第一版为 null）
+   * 多版本发布时，新版本记录这个字段指向旧版；approved 切换到 archived 时
+   * 旧版的 superseded_by_id 指向新版，方便查"现在谁在用"
+   */
+  @Index()
+  @Column({ name: 'parent_skill_id', type: 'text', nullable: true })
+  parentSkillId: string | null;
+
+  /**
+   * 版本关系：当前 archived 版本指向替代它的 approved 版本
+   * 与 parent_skill_id 反向：parentSkillId = "我从哪来"，supersededById = "谁替代了我"
+   * 仅 archived 状态写入；approved / pending / rejected 均为 null
+   */
+  @Column({ name: 'superseded_by_id', type: 'text', nullable: true })
+  supersededById: string | null;
+
+  /**
+   * 被新版替代的时间戳（archived 状态时填入）
+   * 与 rejected（永久死信，需重新提交）的语义区分；archived = 历史版本，记录保留
+   */
+  @Column({ name: 'archived_at', type: 'text', nullable: true })
+  archivedAt: string | null;
+
+  /**
+   * 多版本发布模式（仅在 parent_skill_id 非空时有意义）
+   * 'replace' = 审核通过时自动 archive 旧版（counters 累加）
+   * 'coexist' = 旧版保留 approved 不动，新版独立计 counter
+   * 第一版（无 parent）为 null
+   */
+  @Column({ name: 'supersede_mode', length: 20, nullable: true })
+  supersedeMode: 'replace' | 'coexist' | null;
 
   /** 创建时间 */
   @CreateDateColumn({ name: 'created_at' })

@@ -58,9 +58,25 @@ export class SkillsController {
   @Get(':slug')
   async findBySlug(
     @Param('slug') slugOrId: string,
+    @Query('includeArchived') includeArchived?: string,
     @Req() req?: Request,
   ): Promise<SkillEntity> {
-    return this.skillsService.findBySlug(slugOrId, this.optionalSession(req));
+    return this.skillsService.findBySlug(slugOrId, this.optionalSession(req), {
+      includeArchived: includeArchived === 'true' || includeArchived === '1',
+    });
+  }
+
+  /**
+   * 查询指定技能的所有版本（按时间倒序，最新在前）
+   * 已 archive 的旧版本仅 owner / admin 可见
+   * @param id 链上任意一节点的技能 ID（通常是当前已上架的最新版）
+   */
+  @Get(':id/versions')
+  async findVersions(
+    @Param('id') id: string,
+    @Req() req?: Request,
+  ): Promise<SkillEntity[]> {
+    return this.skillsService.findVersions(id, this.optionalSession(req));
   }
 
   /**
@@ -203,6 +219,28 @@ export class SkillsController {
   }
 
   /**
+   * 技能作者本人编辑元数据（白名单字段，不需管理员）
+   * 已上架技能改 version 时需在 body 里同时传 newZipProvided=true（业务约束）
+   * @param id 技能 ID
+   * @param body 待更新字段
+   */
+  @Put(':id')
+  async updateOwnMeta(
+    @Param('id') id: string,
+    @Body() body: {
+      name?: string;
+      description?: string;
+      category?: string;
+      version?: string;
+      newZipProvided?: boolean;
+    },
+    @Req() req: Request,
+  ): Promise<SkillEntity> {
+    const operator = this.resolveSession(req);
+    return this.skillsService.updateOwnMeta(id, operator, body || {});
+  }
+
+  /**
    * 管理员维护技能的专家组归属（专家组即标签，一个技能可属于多个专家组）
    * @param id 技能 ID
    * @param body 专家组 ID 清单
@@ -258,6 +296,29 @@ export class SkillsController {
   ): Promise<{ success: boolean; id: string }> {
     this.assertPrivileged(req, '删除技能');
     return this.skillsService.deleteSkill(id);
+  }
+
+  /**
+   * 超级管理员回滚到指定历史版本（仅 super_admin）
+   * 当前 approved 版本 archive；目标版本 approved；Git 市场重同步
+   * @param id 当前 approved 版本的 ID
+   * @param body 目标版本 ID
+   */
+  @Post(':id/rollback')
+  async rollbackSkill(
+    @Param('id') id: string,
+    @Body() body: { targetVersionId?: string },
+    @Req() req: Request,
+  ): Promise<{ success: boolean; current: SkillEntity; target: SkillEntity }> {
+    const session = this.resolveSession(req);
+    if (session.role !== 'super_admin') {
+      throw new ForbiddenException('仅超级管理员可回滚技能版本');
+    }
+    if (!body?.targetVersionId) {
+      throw new BadRequestException('targetVersionId 不能为空');
+    }
+    const result = await this.skillsService.rollbackSkill(id, body.targetVersionId);
+    return { success: true, ...result };
   }
 
   /**

@@ -505,9 +505,36 @@ export const api = {
     /** 原始 ZIP（base64）与上传文件名，供无损下载与 Git 市场发布 */
     zipBuffer?: string;
     zipFileName?: string;
+    /** 多版本发布：父版本 ID（不传表示全新技能；传了则进入"发新版本"流程） */
+    parentSkillId?: string;
+    /** 多版本发布：父版本处理模式。coexist=保留共存，replace=替代旧版（counter 继承） */
+    supersedeMode?: 'coexist' | 'replace';
   }): Promise<ApiSkill> {
     return apiFetch<ApiSkill>('/api/v1/skills/upload', {
       method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * 技能作者本人编辑元数据（白名单字段，不需要管理员权限）
+   * 已上架技能改 version 时必须在 payload 同步传 newZipProvided=true，
+   * 后端会拒绝"裸改 approved 的 version"以防止虚标版本号
+   * @param id 技能 ID
+   * @param payload 待更新字段
+   */
+  async updateSkillMeta(
+    id: string,
+    payload: {
+      name?: string;
+      description?: string;
+      category?: string;
+      version?: string;
+      newZipProvided?: boolean;
+    },
+  ): Promise<ApiSkill> {
+    return apiFetch<ApiSkill>(`/api/v1/skills/${encodeURIComponent(id)}`, {
+      method: 'PUT',
       body: JSON.stringify(payload),
     });
   },
@@ -594,6 +621,31 @@ export const api = {
    */
   async deleteSkill(id: string): Promise<{ success: boolean; id: string }> {
     return apiFetch(`/api/v1/skills/${id}`, { method: 'DELETE' });
+  },
+
+  /**
+   * 查询指定技能链上的所有版本（按时间倒序，最新在前）
+   * 已 archive 的旧版本仅 owner / admin 可见
+   * @param id 链上任意一节点的技能 ID
+   */
+  async getSkillVersions(id: string): Promise<ApiSkill[]> {
+    return apiFetch<ApiSkill[]>(`/api/v1/skills/${encodeURIComponent(id)}/versions`);
+  },
+
+  /**
+   * 超级管理员回滚到指定历史版本（仅 super_admin）
+   * 当前 approved 版本 archive；目标版本 approved；Git 市场重同步
+   * @param id 当前 approved 版本的 ID
+   * @param targetVersionId 目标历史版本 ID
+   */
+  async rollbackSkill(
+    id: string,
+    targetVersionId: string,
+  ): Promise<{ success: boolean; current: ApiSkill; target: ApiSkill }> {
+    return apiFetch(`/api/v1/skills/${encodeURIComponent(id)}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({ targetVersionId }),
+    });
   },
 
   /**
