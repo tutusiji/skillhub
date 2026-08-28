@@ -54,6 +54,8 @@ interface MarketplaceViewProps {
   onDownloadZip: (skill: SkillItem) => void;
   onCopyInstallCmd: (cmd: string, clientName?: string) => void;
   onToast?: (type: 'success' | 'error' | 'warning' | 'info', title: string, message: string) => void;
+  /** 是否拥有「分类和专家组管理」菜单权限 */
+  canAccessManage?: boolean;
   /** 进入「分类和专家组管理」页面 */
   onOpenManage?: () => void;
 }
@@ -108,6 +110,7 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
   onDownloadZip,
   onCopyInstallCmd,
   onToast,
+  canAccessManage,
   onOpenManage
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -480,8 +483,8 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
             );
           })}
 
-          {/* 管理员：分类标签管理入口 */}
-          {isAdmin && (
+          {/* 管理员：分类标签管理入口（按菜单权限授权） */}
+          {(canAccessManage ?? isAdmin) && (
             <button
               onClick={() => onOpenManage?.()}
               className="ml-1 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap border border-dashed border-indigo-300 text-indigo-600 hover:bg-indigo-50 flex items-center gap-1 transition-all"

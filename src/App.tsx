@@ -1221,12 +1221,19 @@ export default function App() {
 
   const isSuperAdmin = currentUser?.role === 'super_admin';
   const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
-  // 菜单级权限：超管恒拥有全部；管理员按 menuPermissions 清单控制「审核管理/风控中心」菜单可见性
+  // 菜单级权限：超管恒拥有全部；管理员按 menuPermissions 清单逐项控制业务菜单的可见性
   const menuPermissions = currentUser?.menuPermissions ?? [];
+  const isAdminRole = currentUser?.role === 'admin';
   const canAccessAudit =
-    isSuperAdmin || (currentUser?.role === 'admin' && menuPermissions.includes('audit'));
+    isSuperAdmin || (isAdminRole && menuPermissions.includes('audit'));
   const canAccessRules =
-    isSuperAdmin || (currentUser?.role === 'admin' && menuPermissions.includes('rules'));
+    isSuperAdmin || (isAdminRole && menuPermissions.includes('rules'));
+  const canAccessDemands =
+    isSuperAdmin || (isAdminRole && menuPermissions.includes('demands'));
+  const canAccessFeedback =
+    isSuperAdmin || (isAdminRole && menuPermissions.includes('feedback'));
+  const canAccessManage =
+    isSuperAdmin || (isAdminRole && menuPermissions.includes('manage'));
 
   return (
     <ExpertDomainsProvider>
@@ -1270,8 +1277,8 @@ export default function App() {
               requireAuth('进入分类和专家组管理');
               return;
             }
-            if (!isAdmin) {
-              addToast('warning', '权限不足', '分类和专家组管理仅限管理员访问');
+            if (!canAccessManage) {
+              addToast('warning', '权限不足', '您未被授予分类和专家组管理访问权限');
               return;
             }
             navigate('manage');
@@ -1323,6 +1330,7 @@ export default function App() {
             onCopyInstallCmd={handleCopyCommand}
             currentUser={currentUser}
             onToast={addToast}
+            canAccessManage={canAccessManage}
             onOpenManage={() => navigate('manage')}
           />
         )}
@@ -1333,6 +1341,7 @@ export default function App() {
             demands={demands}
             currentUser={currentUser}
             availableSkills={skills}
+            canManageDemands={canAccessDemands}
             onOpenCreateDemand={() => {
               if (requireAuth('发布技能征集')) {
                 setShowCreateDemandModal(true);
@@ -1548,13 +1557,13 @@ export default function App() {
           )
         )}
 
-        {/* VIEW 8: SUGGESTION CENTER (建议管理，仅管理员) */}
         {/* VIEW 8: SUGGESTION CENTER (建议反馈，全员可用：管理员管理，普通用户看自己的+提交) */}
         {currentTab === 'feedback' && (
           currentUser ? (
             <FeedbackAdminView
               currentUser={currentUser}
               feedbackList={feedbackList}
+              canManageFeedback={canAccessFeedback}
               onDeleteFeedback={handleDeleteFeedback}
               onOpenCreateFeedback={() => {
                 setShowFeedbackModal(true);
@@ -1583,9 +1592,9 @@ export default function App() {
           )
         )}
 
-        {/* VIEW 9: 分类和专家组管理（仅管理员） */}
+        {/* VIEW 9: 分类和专家组管理（按菜单权限授权） */}
         {currentTab === 'manage' && (
-          isAdmin && currentUser ? (
+          canAccessManage && currentUser ? (
             <CategoryAndDomainView
               currentUser={currentUser}
               skills={skills}
@@ -1599,7 +1608,7 @@ export default function App() {
               </div>
               <h2 className="text-lg font-bold text-slate-900">分类和专家组管理仅限管理员</h2>
               <p className="text-xs text-slate-500">
-                分类与专家组管理属于企业管理员专属模块，普通用户无此入口。
+                分类与专家组管理属于企业管理员专属模块，请联系超级管理员授予「分类和专家组管理」菜单权限。
               </p>
               <button
                 onClick={() => navigate('market')}

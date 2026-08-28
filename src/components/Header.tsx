@@ -64,12 +64,19 @@ export const Header: React.FC<HeaderProps> = ({
 
   const isSuperAdmin = currentUser?.role === 'super_admin';
   const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
-  // 菜单级权限：超管恒全量；管理员按 menuPermissions 控制「审核管理/风控中心」入口
+  // 菜单级权限：超管恒全量；管理员按 menuPermissions 控制各业务菜单入口
   const menuPermissions = currentUser?.menuPermissions ?? [];
+  const isAdminRole = currentUser?.role === 'admin';
   const canAccessAudit =
-    isSuperAdmin || (currentUser?.role === 'admin' && menuPermissions.includes('audit'));
+    isSuperAdmin || (isAdminRole && menuPermissions.includes('audit'));
   const canAccessRules =
-    isSuperAdmin || (currentUser?.role === 'admin' && menuPermissions.includes('rules'));
+    isSuperAdmin || (isAdminRole && menuPermissions.includes('rules'));
+  const canAccessDemands =
+    isSuperAdmin || (isAdminRole && menuPermissions.includes('demands'));
+  const canAccessFeedback =
+    isSuperAdmin || (isAdminRole && menuPermissions.includes('feedback'));
+  const canAccessManage =
+    isSuperAdmin || (isAdminRole && menuPermissions.includes('manage'));
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -303,8 +310,8 @@ export const Header: React.FC<HeaderProps> = ({
                     <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
                   </button>
 
-                  {/* Demands Management Shortcut（仅管理员可见） */}
-                  {isAdmin && (
+                  {/* Demands Management Shortcut（按菜单权限授权） */}
+                  {canAccessDemands && (
                     <button
                       onClick={() => {
                         onSelectTab('demands');
@@ -337,8 +344,8 @@ export const Header: React.FC<HeaderProps> = ({
                     </button>
                   )}
 
-                  {/* 建议管理（仅管理员可见） */}
-                  {isAdmin && (
+                  {/* 建议管理（按菜单权限授权） */}
+                  {canAccessFeedback && (
                     <button
                       onClick={() => {
                         onSelectTab('feedback');
@@ -355,8 +362,8 @@ export const Header: React.FC<HeaderProps> = ({
                     </button>
                   )}
 
-                  {/* 分类和专家组管理（仅管理员可见） */}
-                  {isAdmin && (
+                  {/* 分类和专家组管理（按菜单权限授权） */}
+                  {canAccessManage && (
                     <button
                       onClick={() => {
                         onSelectTab('manage');

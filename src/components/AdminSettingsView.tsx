@@ -16,6 +16,8 @@ import {
   ListChecks,
   Sliders,
   ClipboardCheck,
+  MessageSquarePlus,
+  Tags,
 } from 'lucide-react';
 import { UserAccount, UserRole } from '../types';
 import { PopconfirmBubble } from './PopconfirmBubble';
@@ -29,9 +31,11 @@ interface AdminSettingsViewProps {
   onToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, message: string) => void;
 }
 
-/** 可勾选的菜单权限定义 */
+/** 可勾选的菜单权限定义（与 server/src/modules/auth/auth.service.ts MENU_PERMISSION_KEYS 保持同步） */
+export type MenuPermissionKey = 'audit' | 'rules' | 'demands' | 'feedback' | 'manage';
+
 const MENU_PERMISSION_OPTIONS: Array<{
-  key: 'audit' | 'rules';
+  key: MenuPermissionKey;
   label: string;
   desc: string;
   icon: React.ReactNode;
@@ -48,6 +52,33 @@ const MENU_PERMISSION_OPTIONS: Array<{
     desc: '风控规则与大模型网关配置',
     icon: <Sliders className="w-4 h-4" />,
   },
+  {
+    key: 'demands',
+    label: '征集管理',
+    desc: '技能征集广场的审核、驳回与删除',
+    icon: <Coins className="w-4 h-4" />,
+  },
+  {
+    key: 'feedback',
+    label: '建议管理',
+    desc: '全站建议的查看与删除',
+    icon: <MessageSquarePlus className="w-4 h-4" />,
+  },
+  {
+    key: 'manage',
+    label: '分类和专家组管理',
+    desc: '技能分类与岗位专家组的 CRUD',
+    icon: <Tags className="w-4 h-4" />,
+  },
+];
+
+/** 新建/无任何管理员时默认授予的菜单权限全集（与白名单一致） */
+const ALL_MENU_PERMISSION_KEYS: MenuPermissionKey[] = [
+  'audit',
+  'rules',
+  'demands',
+  'feedback',
+  'manage',
 ];
 
 export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
@@ -71,7 +102,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
    * 没有管理员时默认全勾（新委任的管理员默认获得全部菜单）
    */
   const globalMenuPermissions = useMemo(() => {
-    if (adminUsers.length === 0) return ['audit', 'rules'];
+    if (adminUsers.length === 0) return [...ALL_MENU_PERMISSION_KEYS];
     return MENU_PERMISSION_OPTIONS.filter(opt =>
       adminUsers.every(u => (u.menuPermissions || []).includes(opt.key)),
     ).map(opt => opt.key);
@@ -106,7 +137,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
    * @param key 菜单权限键
    * @param checked 是否勾选
    */
-  const handleToggleGlobalMenuPermission = (key: 'audit' | 'rules', checked: boolean) => {
+  const handleToggleGlobalMenuPermission = (key: MenuPermissionKey, checked: boolean) => {
     if (!isSuperAdmin) {
       onToast('error', '权限不足', '仅超级管理员具备调整菜单权限的能力');
       return;

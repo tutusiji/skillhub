@@ -33,6 +33,8 @@ interface SkillDemandMarketViewProps {
   demands: SkillDemand[];
   currentUser: UserAccount | null;
   availableSkills: SkillItem[];
+  /** 是否拥有「征集管理」菜单权限（仅管理员有效，超管恒为 true） */
+  canManageDemands?: boolean;
   onOpenCreateDemand: () => void;
   onSelectDemand: (demand: SkillDemand) => void;
   onApproveDemand: (id: string) => void;
@@ -46,6 +48,7 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
   demands,
   currentUser,
   availableSkills,
+  canManageDemands,
   onOpenCreateDemand,
   onSelectDemand,
   onApproveDemand,
@@ -67,6 +70,8 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
 
   const isSuperAdmin = currentUser?.role === 'super_admin';
   const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
+  // 征集管理能力 = 超管 或（管理员 且 拥有 'demands' 菜单权限）；未传时回退到旧的 isAdmin 行为
+  const canManage = canManageDemands ?? isAdmin;
 
   // 专家组筛选项：后端专家数据 + 前置「全部岗位」虚拟项（不存于后端）
   const { domains: backendDomains } = useExpertDomains();
@@ -80,8 +85,8 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
     return demands.filter(d => {
       // Visibility rule:
       // Regular users only see 'open' and 'fulfilled' demands, PLUS their own pending/rejected demands.
-      // Admins see all demands.
-      if (!isAdmin) {
+      // Admins (with the 'demands' menu permission) see all demands.
+      if (!canManage) {
         const isMine = currentUser && d.author.id === currentUser.id;
         if (!isMine && d.status !== 'open' && d.status !== 'approved' && d.status !== 'fulfilled') {
           return false;
@@ -115,7 +120,7 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       }
     });
-  }, [demands, selectedDomain, selectedStatus, searchQuery, sortBy, isAdmin, currentUser]);
+  }, [demands, selectedDomain, selectedStatus, searchQuery, sortBy, canManage, currentUser]);
 
   // Statistics
   const totalBountyPool = useMemo(() => {
@@ -194,7 +199,7 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
               <span className="text-sm font-black text-white">{currentUser.points.toLocaleString()} 积分</span>
               <span className="text-slate-400 text-[11px]">(最低 100 积分即可发起征集)</span>
             </div>
-            {isAdmin && pendingDemandsCount > 0 && (
+            {canManage && pendingDemandsCount > 0 && (
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 font-bold text-xs border border-amber-400/30">
                 <ShieldCheck className="w-3.5 h-3.5" />
                 <span>管理员提醒：有 {pendingDemandsCount} 条新需求等待审核</span>
@@ -259,8 +264,8 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
             <option value="all">全部状态</option>
             <option value="open">🔥 征集中</option>
             <option value="fulfilled">✅ 已完结</option>
-            {isAdmin && <option value="pending">⏳ 待管理员审核</option>}
-            {isAdmin && <option value="rejected">❌ 已驳回</option>}
+            {canManage && <option value="pending">⏳ 待管理员审核</option>}
+            {canManage && <option value="rejected">❌ 已驳回</option>}
           </select>
 
           {/* Sort */}
@@ -426,7 +431,7 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
 
                     <div className="flex items-center gap-1">
                       {/* Admin inline approve/reject buttons for pending */}
-                      {isAdmin && demand.status === 'pending' && (
+                      {canManage && demand.status === 'pending' && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();

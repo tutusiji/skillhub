@@ -16,6 +16,8 @@ import { Avatar } from './Avatar';
 interface FeedbackAdminViewProps {
   currentUser: UserAccount;
   feedbackList: FeedbackItem[];
+  /** 是否拥有「建议管理」菜单权限（未传时回退到旧的角色判定） */
+  canManageFeedback?: boolean;
   onDeleteFeedback: (id: string) => void;
   onOpenCreateFeedback: () => void;
   onToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, message: string) => void;
@@ -37,11 +39,12 @@ const CATEGORY_META: Record<string, { label: string; cls: string }> = {
 export const FeedbackAdminView: React.FC<FeedbackAdminViewProps> = ({
   currentUser,
   feedbackList,
+  canManageFeedback,
   onDeleteFeedback,
   onOpenCreateFeedback,
   onToast,
 }) => {
-  const isPrivileged = currentUser.role === 'admin' || currentUser.role === 'super_admin';
+  const isPrivileged = canManageFeedback ?? (currentUser.role === 'admin' || currentUser.role === 'super_admin');
 
   const handleDelete = (item: FeedbackItem) => {
     onDeleteFeedback(item.id);

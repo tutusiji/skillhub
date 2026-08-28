@@ -51,8 +51,9 @@ export class UserEntity {
   passwordHash: string;
 
   /**
-   * 菜单级权限清单，如 ['audit', 'rules']
-   * 超管恒拥有全部菜单（前端判定兜底），管理员按此清单控制「审核管理/风控中心」菜单可见性
+   * 菜单级权限清单，如 ['audit', 'rules', 'demands', 'feedback', 'manage']
+   * 超管恒拥有全部菜单（前端判定兜底），管理员按此清单逐项控制业务菜单可见性：
+   * audit 审核管理 / rules 风控中心 / demands 征集管理 / feedback 建议管理 / manage 分类和专家组管理
    */
   @Column('simple-json', { name: 'menu_permissions', default: '[]' })
   menuPermissions: string[];

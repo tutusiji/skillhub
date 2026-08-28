@@ -37,11 +37,27 @@ const DEFAULT_SUPER_ADMIN_PASSWORD = 'skill@2026';
 /** 可被委任的角色白名单，super_admin 不可通过接口授予 */
 export const ASSIGNABLE_ROLES = ['admin', 'user'];
 
-/** 菜单级权限白名单：'audit' 审核管理 / 'rules' 风控中心 */
-export const MENU_PERMISSION_KEYS = ['audit', 'rules'] as const;
+/** 菜单级权限白名单
+ *  - 'audit'    审核管理
+ *  - 'rules'    风控中心
+ *  - 'demands'  征集管理（广场内的审核/驳回/删除）
+ *  - 'feedback' 建议管理（管理员可查看/删除全部建议）
+ *  - 'manage'   分类和专家组管理
+ */
+export const MENU_PERMISSION_KEYS = ['audit', 'rules', 'demands', 'feedback', 'manage'] as const;
 
-/** 管理员默认获得的菜单权限 */
-const DEFAULT_ADMIN_MENU_PERMISSIONS = ['audit', 'rules'];
+/** 管理员默认获得的菜单权限（与白名单保持一致，新增管理员即拥有全部业务菜单） */
+const DEFAULT_ADMIN_MENU_PERMISSIONS = [...MENU_PERMISSION_KEYS] as string[];
+
+/**
+ * 历史版本的菜单权限全集。
+ *
+ * 早期只有 audit / rules 两个键，「征集管理 / 建议管理 / 分类和专家组管理」
+ * 当时是写死的 role === 'admin' 判定，不受菜单权限约束。本次把这三块也纳入
+ * 菜单权限后，库里存量管理员若仍是 ['audit','rules']，会突然失去这三个入口。
+ * 因此启动期把「恰好等于历史全集」的管理员平滑升级到新全集，保持权限不回退。
+ */
+const LEGACY_FULL_MENU_PERMISSIONS = ['audit', 'rules'];
 
 export interface UserSession {
   id: string;
@@ -177,7 +193,13 @@ export class AuthService implements OnModuleInit {
     let permsFixed = 0;
     for (const user of adminUsers) {
       const perms = Array.isArray(user.menuPermissions) ? user.menuPermissions : [];
-      if (perms.length === 0) {
+      // 完全没有权限：按默认全集补齐，否则管理员登录后一个管理菜单都看不到
+      const isEmpty = perms.length === 0;
+      // 恰好是历史全集：说明这是升级前的老数据，而非超管主动裁剪过的权限，平滑补齐新键
+      const isLegacyFull =
+        perms.length === LEGACY_FULL_MENU_PERMISSIONS.length &&
+        LEGACY_FULL_MENU_PERMISSIONS.every((key) => perms.includes(key));
+      if (isEmpty || isLegacyFull) {
         user.menuPermissions = [...DEFAULT_ADMIN_MENU_PERMISSIONS];
         await this.userRepository.save(user);
         permsFixed += 1;
@@ -645,10 +667,10 @@ export class AuthService implements OnModuleInit {
   }
 
   /**
-   * 超级管理员调整指定管理员的菜单级权限（勾选/取消「审核管理/风控中心」）
+   * 超级管理员调整指定管理员的菜单级权限（勾选/取消各业务菜单入口）
    * 权限值需在白名单内；超级管理员的权限恒全量，不接受修改
    * @param userId 目标用户 ID
-   * @param permissions 菜单权限清单，如 ['audit', 'rules']
+   * @param permissions 菜单权限清单，取值见 MENU_PERMISSION_KEYS
    */
   async updateUserMenuPermissions(
     userId: string,

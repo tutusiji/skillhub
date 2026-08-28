@@ -247,7 +247,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
                 <ShieldCheck className="w-5 h-5" />
               </span>
               <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                审核管理中心 (超级管理员)
+                审核管理中心
               </h2>
             </div>
             <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-2xl leading-relaxed">
