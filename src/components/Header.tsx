@@ -247,7 +247,8 @@ export const Header: React.FC<HeaderProps> = ({
                     {currentUser.name}
                   </div>
                   <div className="text-[10px] text-amber-600 font-bold flex items-center gap-1">
-                    <span>🪙 {currentUser.points?.toLocaleString() || 10000}</span>
+                    <Coins className="w-3 h-3" />
+                    <span>{currentUser.points?.toLocaleString() || 10000}</span>
                   </div>
                 </div>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
@@ -289,8 +290,11 @@ export const Header: React.FC<HeaderProps> = ({
 
                     {/* Points Balance Pill */}
                     <div className="flex items-center justify-between p-2 rounded-xl bg-amber-500/10 border border-amber-200 text-amber-900 text-[11px]">
-                      <span className="font-medium">奖励积分余额</span>
-                      <span className="font-black text-xs">🪙 {currentUser.points?.toLocaleString() || 10000} pts</span>
+                      <span className="font-medium">技能积分</span>
+                      <span className="font-black text-xs flex items-center gap-1">
+                        <Coins className="w-3.5 h-3.5 text-amber-600" />
+                        <span>{currentUser.points?.toLocaleString() || 10000} pts</span>
+                      </span>
                     </div>
                   </div>
 
@@ -388,13 +392,10 @@ export const Header: React.FC<HeaderProps> = ({
                         setShowUserMenu(false);
                       }}
                       id="menu-item-logout"
-                      className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-rose-50 text-rose-600 font-semibold transition-colors text-left"
+                      className="w-full flex items-center gap-2.5 p-2.5 rounded-xl hover:bg-rose-50 text-rose-600 font-semibold transition-colors text-left"
                     >
-                      <div className="flex items-center gap-2.5">
-                        <LogOut className="w-4 h-4 text-rose-500" />
-                        <span>退出当前登录</span>
-                      </div>
-                      <span className="text-[10px] text-rose-400">切换至访客</span>
+                      <LogOut className="w-4 h-4 text-rose-500" />
+                      <span>退出当前登录</span>
                     </button>
                   </div>
                 </div>

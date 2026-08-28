@@ -1,6 +1,12 @@
 # SkillHub Kubernetes 部署清单（内网 K8s + 远程 PostgreSQL）
 # 用法：kubectl apply -f deploy/k8s/skillhub.yaml
 # 完整说明见 docs/deployment-guide.md 第 8 节
+#
+# 架构说明：
+#   - 镜像只跑 NestJS：同时托管 dist/（前端 SPA + history fallback）、API、git-market
+#   - K8s 侧只暴露 Service (3001)；无 Ingress
+#   - 域名由**外部 nginx** 转发到该 Service:3001（外部 nginx 负责 HTTPS 终止 / WAF 等）
+#   - 上传 ZIP、git streaming 所需的 body size / 超时在外部 nginx 上配置
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -105,24 +111,3 @@ spec:
   ports:
     - port: 3001
       targetPort: 3001
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: skillhub
-  namespace: skillhub
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "64m"   # 上传 ZIP 需要
-spec:
-  ingressClassName: nginx
-  rules:
-    - host: skillhub.corp            # 内网域名，按环境替换
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: skillhub
-                port:
-                  number: 3001

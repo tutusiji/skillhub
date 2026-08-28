@@ -239,10 +239,10 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
             {/* Points Badge Card */}
             <div className="p-3.5 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200/90 text-amber-950 flex items-center gap-3 shadow-2xs">
               <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-base shadow-sm">
-                🪙
+                <Coins className="w-5 h-5" />
               </div>
               <div>
-                <div className="text-[11px] text-amber-800 font-medium">我的奖励积分</div>
+                <div className="text-[11px] text-amber-800 font-medium">我的技能积分</div>
                 <div className="text-lg font-black text-slate-900 leading-tight">
                   {currentUser.points.toLocaleString()} <span className="text-xs font-normal text-slate-500">积分</span>
                 </div>
@@ -473,7 +473,7 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
                       {/* Status & Bounty */}
                       <div className="flex items-center gap-2.5 shrink-0 self-start sm:self-center">
                         <div className="px-3 py-1 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 font-black text-xs flex items-center gap-1">
-                          <span>🪙</span>
+                          <Coins className="w-3.5 h-3.5 text-amber-700" />
                           <span>{demand.bountyPoints.toLocaleString()} 积分</span>
                         </div>
 

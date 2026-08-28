@@ -174,10 +174,10 @@ export const CreateSkillDemandModal: React.FC<CreateSkillDemandModalProps> = ({
         <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-50 via-orange-50/50 to-indigo-50/40 border border-amber-200/80 flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-sm shadow-sm">
-              🪙
+              <Coins className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-[11px] text-slate-500 font-medium">我的奖励积分余额</div>
+              <div className="text-[11px] text-slate-500 font-medium">我的技能积分</div>
               <div className="text-base font-black text-slate-900">
                 {currentUser.points.toLocaleString()} <span className="text-xs font-normal text-slate-600">积分</span>
               </div>
@@ -276,7 +276,7 @@ export const CreateSkillDemandModal: React.FC<CreateSkillDemandModalProps> = ({
                   onChange={e => setBountyPoints(Math.max(100, parseInt(e.target.value) || 100))}
                   className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs text-slate-900 font-bold pl-8"
                 />
-                <span className="absolute left-3 top-2.5 text-xs text-amber-500">🪙</span>
+                <Coins className="absolute left-3 top-2.5 w-4 h-4 text-amber-500" />
               </div>
               <div className="flex items-center gap-1.5 mt-1.5 text-[11px]">
                 <span className="text-slate-400">快捷推荐：</span>

@@ -181,7 +181,7 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
           )}
 
           <div className="ml-auto px-3 py-1 rounded-xl bg-amber-500/10 border border-amber-300 text-amber-900 font-black text-sm flex items-center gap-1.5 shadow-2xs">
-            <span>🪙</span>
+            <Coins className="w-4 h-4" />
             <span>{demand.bountyPoints.toLocaleString()} 积分</span>
           </div>
         </div>

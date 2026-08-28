@@ -209,7 +209,10 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
         {currentUser && (
           <div className="relative z-10 mt-6 pt-4 border-t border-white/10 flex items-center justify-between flex-wrap gap-3 text-xs text-slate-300">
             <div className="flex items-center gap-2">
-              <span className="text-amber-400 font-bold">🪙 我的奖励积分余额：</span>
+              <span className="text-amber-400 font-bold flex items-center gap-1.5">
+                <Coins className="w-4 h-4" />
+                我的技能积分：
+              </span>
               <span className="text-sm font-black text-white">{currentUser.points.toLocaleString()} 积分</span>
               <span className="text-slate-400 text-[11px]">(最低 100 积分即可发起征集)</span>
             </div>
@@ -288,7 +291,7 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
             onChange={e => setSortBy(e.target.value as any)}
             className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
           >
-            <option value="bounty_desc">🪙 奖励积分从高到低</option>
+            <option value="bounty_desc">奖励积分从高到低</option>
             <option value="latest">⏱️ 最新发布时间</option>
           </select>
 
@@ -366,7 +369,7 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
                     </span>
 
                     <div className="px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200/90 text-amber-800 font-black text-xs flex items-center gap-1 shadow-2xs">
-                      <span>🪙</span>
+                      <Coins className="w-3 h-3 text-amber-700" />
                       <span>{demand.bountyPoints.toLocaleString()} 积分</span>
                     </div>
                   </div>
@@ -575,7 +578,7 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
                       {/* Bounty */}
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <div className="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200/90 text-amber-800 font-black text-[11px] flex items-center gap-1 w-fit">
-                          <span>🪙</span>
+                          <Coins className="w-3 h-3 text-amber-700" />
                           <span>{demand.bountyPoints.toLocaleString()}</span>
                         </div>
                       </td>
