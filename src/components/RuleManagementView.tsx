@@ -497,9 +497,6 @@ export async function handleUserQuery(input: string) {
               <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
                 风控中心
               </h1>
-              <span className="px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 text-xs font-bold border border-purple-200">
-                超级管理员专属
-              </span>
             </div>
             <p className="text-xs sm:text-sm text-slate-600 max-w-3xl leading-relaxed">
               统一配置「正则特征硬拦截引擎」与「大模型语义安全网关」，提供规则增删改查、全流程在线实测沙箱与模型调度参数调优。
@@ -739,12 +736,23 @@ export async function handleUserQuery(input: string) {
                       <label className="block text-xs font-bold text-slate-800 mb-1">
                         正则表达式模式 (PCRE / ECMAScript 兼容) <span className="text-rose-500">*</span>
                       </label>
-                      <input
-                        type="text"
+                      {/*
+                        用 textarea 而不是 input，是为了让长正则自动换行显示完整；
+                        但正则本身必须是单行，所以粘贴/输入的换行一律剔除，
+                        并拦掉回车键——否则换行会落在模式中间，trim() 只能去掉首尾，
+                        中间的 \n 会让规则静默失效或编译报错。
+                      */}
+                      <textarea
+                        rows={3}
                         value={formPattern}
-                        onChange={e => setFormPattern(e.target.value)}
+                        onChange={e => setFormPattern(e.target.value.replace(/[\r\n]+/g, ''))}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') e.preventDefault();
+                        }}
                         placeholder="(?i)(?:sk-live-[a-zA-Z0-9]{32})"
-                        className="w-full px-4 py-2.5 rounded-xl font-mono text-xs border border-slate-300 bg-slate-50 text-indigo-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                        spellCheck={false}
+                        className="w-full px-4 py-2.5 rounded-xl font-mono text-xs border border-slate-300 bg-slate-50 text-indigo-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none resize-y min-h-[44px] break-all whitespace-pre-wrap"
+                        style={{ wordBreak: 'break-all' }}
                       />
                       <span className="text-[11px] text-slate-500 mt-1 block">
                         提示: 支持标准修饰符，例如 <code>(?i)</code> 不区分大小写，<code>(?:...)</code> 非捕获分组。
@@ -895,8 +903,9 @@ export async function handleUserQuery(input: string) {
                       </p>
 
                       {rule.pattern && (
-                        <div className="p-2 rounded-xl bg-slate-900 text-emerald-400 font-mono text-[11px] break-all select-all flex items-center justify-between gap-2">
-                          <span className="truncate">模式: {rule.pattern}</span>
+                        <div className="p-2 rounded-xl bg-slate-900 text-emerald-400 font-mono text-[11px] break-all whitespace-pre-wrap select-all">
+                          <div className="text-slate-500 mb-1 select-none">模式</div>
+                          <div>{rule.pattern}</div>
                         </div>
                       )}
 
