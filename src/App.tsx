@@ -889,6 +889,47 @@ export default function App() {
   };
 
   /**
+   * 个人中心「换一个头像」：随机切换当前用户头像
+   *
+   * seed 由后端生成并落库（同时刷新业务表快照），前端只负责把返回的新头像
+   * 铺到所有引用点：currentUser、组织成员列表，以及 skills / demands 里
+   * 冗余存的作者头像 —— 这三张表的头像是快照，不跟着 users 自动变，
+   * 漏掉任何一处就会出现「个人中心换了脸、集市里还是旧脸」。
+   */
+  const handleShuffleAvatar = async () => {
+    if (!currentUser) return;
+
+    try {
+      const updated = await api.shuffleMyAvatar();
+      const nextAvatar = mapApiUser(updated).avatar;
+
+      setCurrentUser(prev => (prev ? { ...prev, avatar: nextAvatar } : prev));
+      setAllUsers(prev =>
+        prev.map(u => (u.id === updated.id ? { ...u, avatar: nextAvatar } : u))
+      );
+      // 本地同步作者头像：优先按 submitterId 精确匹配，历史数据没有该字段时
+      // 才回落姓名比对（与 isOwnSubmission 的判定口径保持一致）
+      setSkills(prev =>
+        prev.map(s =>
+          isOwnSubmission(s, currentUser)
+            ? { ...s, author: { ...s.author, avatar: nextAvatar } }
+            : s
+        )
+      );
+      setDemands(prev =>
+        prev.map(d =>
+          d.author.id === updated.id
+            ? { ...d, author: { ...d.author, avatar: nextAvatar } }
+            : d
+        )
+      );
+      addToast('success', '头像已更新', '已为你随机生成一个新头像');
+    } catch (error) {
+      addToast('error', '头像更新失败', (error as Error).message);
+    }
+  };
+
+  /**
    * 超级管理员勾选/取消某管理员的菜单权限（审核管理、风控中心）
    * 乐观更新 allUsers 与 currentUser，失败回滚
    * @param userId 目标用户 ID
@@ -1373,6 +1414,7 @@ export default function App() {
             }}
             onCopyInstallCmd={(cmd) => addToast('success', '安装命令已复制', cmd)}
             onDeleteDemand={handleDeleteDemand}
+            onShuffleAvatar={handleShuffleAvatar}
             onToast={addToast}
           />
         )}

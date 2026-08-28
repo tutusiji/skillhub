@@ -18,6 +18,7 @@ import { OssIamService } from './oss-iam.service';
 import { shouldSeedDemoData } from '../../common/runtime-env';
 import {
   buildAvatarUrl,
+  buildRandomAvatarSeed,
   buildUserAvatarUrl,
   reconcileAvatarUrl,
 } from '../../common/avatar.util';
@@ -279,6 +280,20 @@ export class AuthService implements OnModuleInit {
       },
     ];
 
+    // 按姓名反查用户的权威头像：只接受「全站姓名唯一」的匹配。
+    // 重名时无法确定是哪一个人，宁可退回按姓名派生，也不能张冠李戴贴错脸。
+    const nameToAvatar = new Map<string, string>();
+    const nameRows: Array<{ nm: string; url: string }> = await this.dataSource.query(
+      `SELECT name AS nm, min(avatar_url) AS url
+         FROM users
+        WHERE avatar_url IS NOT NULL AND avatar_url <> ''
+        GROUP BY name
+       HAVING count(*) = 1`,
+    );
+    for (const row of nameRows) {
+      nameToAvatar.set(row.nm, row.url);
+    }
+
     let fallbackFixed = 0;
     for (const { table, column, nameColumn, joinKey } of nameFallbacks) {
       const rows: Array<{ id: string; nm: string | null; cur: string | null }> =
@@ -293,7 +308,13 @@ export class AuthService implements OnModuleInit {
               )`,
         );
       for (const row of rows) {
-        const expected = buildAvatarUrl(row.nm || 'anonymous');
+        // 优先复用同名用户的权威头像（含他自己切换过的头像），
+        // 否则才按姓名当 seed 派生。前者能让「集市里的作者头像」与
+        // 「个人中心的头像」保持同一张脸 —— 历史 skills 行 submitter_id
+        // 全为 NULL，光靠外键 JOIN 永远修不好这批数据。
+        const expected =
+          (row.nm ? nameToAvatar.get(row.nm) : undefined) ??
+          buildAvatarUrl(row.nm || 'anonymous');
         if (row.cur === expected) continue;
         await this.dataSource.query(
           `UPDATE ${table} SET ${column} = $1 WHERE id = $2`,
@@ -681,6 +702,81 @@ export class AuthService implements OnModuleInit {
     user.points = next;
     const saved = await this.userRepository.save(user);
     return this.toSessionUser(saved);
+  }
+
+  /**
+   * 随机切换用户头像（个人中心「换一个头像」）
+   *
+   * 做法是给身份 seed 追加一个随机后缀（`7462200-a3f9`），重新生成头像 URL。
+   * 选中的 seed 会写入 users.avatar_seed 持久化，因为启动期 reconcile 会按
+   * seed 重建 URL —— 只存 URL 的话换 host 或重启就把用户选的脸打回默认脸。
+   *
+   * 同时刷新三张业务表里的头像快照，否则集市/征集广场仍显示旧头像，
+   * 同一个人在不同页面两副脸。
+   * @param userId 当前登录用户 ID（只能改自己）
+   */
+  async shuffleUserAvatar(userId: string): Promise<UserSession> {
+    const user = await findByUuid(this.userRepository, userId);
+    if (!user) {
+      throw new NotFoundException('未找到指定企业用户');
+    }
+
+    const nextSeed = buildRandomAvatarSeed(user, user.avatarSeed);
+    user.avatarSeed = nextSeed;
+    user.avatar = buildAvatarUrl(nextSeed);
+    const saved = await this.userRepository.save(user);
+
+    await this.syncUserAvatarSnapshots(saved);
+    return this.toSessionUser(saved);
+  }
+
+  /**
+   * 把某个用户的最新头像同步到三张业务表的快照字段
+   *
+   * skills / skill_demands / feedback 冗余存了作者头像（列表接口不回表）。
+   * 除了按外键匹配，还要按姓名兜底：历史 skills 行的 submitter_id 全为 NULL，
+   * 只认外键的话用户换了头像、集市里他的技能卡还是旧脸。
+   * 姓名兜底仅在该姓名全站唯一时执行，避免重名用户被贴上别人的头像。
+   * @param user 已保存的用户实体
+   */
+  private async syncUserAvatarSnapshots(user: UserEntity): Promise<void> {
+    const targets = [
+      { table: 'skills', column: 'avatar', joinKey: 'submitter_id', nameColumn: 'author' },
+      {
+        table: 'skill_demands',
+        column: 'author_avatar',
+        joinKey: 'author_id',
+        nameColumn: 'author_name',
+      },
+      {
+        table: 'feedback',
+        column: 'submitter_avatar',
+        joinKey: 'submitter_id',
+        nameColumn: 'submitter_name',
+      },
+    ];
+
+    // 姓名兜底的前置条件：全站同名用户仅此一人
+    const [{ cnt }] = await this.dataSource.query(
+      'SELECT count(*)::int AS cnt FROM users WHERE name = $1',
+      [user.name],
+    );
+    const nameIsUnique = Number(cnt) === 1;
+
+    for (const { table, column, joinKey, nameColumn } of targets) {
+      await this.dataSource.query(
+        `UPDATE ${table} SET ${column} = $1 WHERE ${joinKey} = $2`,
+        [user.avatar, user.id],
+      );
+      if (nameIsUnique) {
+        await this.dataSource.query(
+          `UPDATE ${table} SET ${column} = $1
+            WHERE ${nameColumn} = $2
+              AND (${joinKey} IS NULL OR ${joinKey} = '' OR ${joinKey} = $3)`,
+          [user.avatar, user.name, user.id],
+        );
+      }
+    }
   }
 
   /**

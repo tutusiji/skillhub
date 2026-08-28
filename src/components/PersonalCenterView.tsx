@@ -27,7 +27,8 @@ import {
   Trash2,
   Settings,
   MessageSquare,
-  Shield
+  Shield,
+  RefreshCw
 } from 'lucide-react';
 import { SkillItem, UserAccount, SkillDemand } from '../types';
 import { SkillCard } from './SkillCard';
@@ -50,6 +51,8 @@ interface PersonalCenterViewProps {
   onOpenCreateDemandModal?: () => void;
   onDeleteDemand: (id: string) => void;
   onOpenSettings?: () => void;
+  /** 随机切换头像（个人中心头像旁的切换按钮） */
+  onShuffleAvatar?: () => Promise<void> | void;
   onOpenLogin: () => void;
   onCopyInstallCmd: (cmd: string) => void;
   onToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, message: string) => void;
@@ -73,10 +76,13 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
   onOpenSettings,
   onOpenLogin,
   onCopyInstallCmd,
+  onShuffleAvatar,
   onToast
 }) => {
   const [activeTab, setActiveTab] = useState<PersonalTab>('demands');
   const [searchQuery, setSearchQuery] = useState('');
+  // 头像切换中：用于禁用按钮 + 转圈，避免连点产生多次请求（每次都会写库）
+  const [avatarSwitching, setAvatarSwitching] = useState(false);
   // 专家组数据走 hook（与首页/管理端/征集广场保持同一份），徽章名称才跟随后端修改
   const { domains: expertDomains } = useExpertDomains();
 
@@ -169,15 +175,36 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
 
         <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="flex items-center gap-4">
-            <div className="relative">
+            <div className="relative group">
               <img
                 src={currentUser.avatar}
                 alt={currentUser.name}
-                className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 border-indigo-100 shadow-md"
+                className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 border-indigo-100 shadow-md bg-white"
               />
               <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 border-2 border-white rounded-full flex items-center justify-center" title="在线">
                 <span className="w-1.5 h-1.5 bg-white rounded-full" />
               </span>
+              {/* 换一个头像：头像按 seed 生成，这里让后端换个随机 seed 重新生成 */}
+              {onShuffleAvatar && (
+                <button
+                  type="button"
+                  disabled={avatarSwitching}
+                  onClick={async () => {
+                    if (avatarSwitching) return;
+                    setAvatarSwitching(true);
+                    try {
+                      await onShuffleAvatar();
+                    } finally {
+                      setAvatarSwitching(false);
+                    }
+                  }}
+                  title="换一个头像"
+                  aria-label="换一个头像"
+                  className="absolute -top-1.5 -right-1.5 w-7 h-7 rounded-full bg-white border border-slate-200 text-slate-500 shadow-md flex items-center justify-center transition hover:text-indigo-600 hover:border-indigo-300 hover:shadow-lg active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${avatarSwitching ? 'animate-spin' : ''}`} />
+                </button>
+              )}
             </div>
 
             <div className="space-y-1.5">

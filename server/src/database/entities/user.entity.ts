@@ -69,6 +69,17 @@ export class UserEntity {
   @Column({ name: 'avatar_url', nullable: true, type: 'text' })
   avatar: string;
 
+  /**
+   * 用户手动切换头像时选中的 seed（如 '7462200-a3f9'）
+   *
+   * 为空表示「跟随默认」，头像 seed 由工号推导。一旦用户点过「换一个头像」，
+   * 这里就存下他选中的 seed，启动期 reconcile 必须以它为准重建 URL，
+   * 否则换 host 或重启时会把用户选的脸重置回默认脸。
+   * 只存 seed 不存完整 URL，是为了让「换头像服务」与「用户选择」互不干扰。
+   */
+  @Column({ name: 'avatar_seed', nullable: true, type: 'text' })
+  avatarSeed: string | null;
+
   /** 积分/贡献点数 */
   @Column({ default: 10000 })
   points: number;

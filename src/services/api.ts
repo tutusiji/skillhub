@@ -754,6 +754,16 @@ export const api = {
   },
 
   /**
+   * 随机切换当前登录用户的头像
+   *
+   * 后端按 seed 重新生成头像并落库（含业务表快照），返回最新会话对象。
+   * 接口不带 userId：目标恒为登录本人。
+   */
+  async shuffleMyAvatar(): Promise<ApiUser> {
+    return apiFetch<ApiUser>('/api/v1/auth/me/avatar', { method: 'PATCH' });
+  },
+
+  /**
    * 获取技能征集需求列表
    */
   async listDemands(): Promise<ApiSkillDemand[]> {

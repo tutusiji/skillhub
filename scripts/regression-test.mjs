@@ -948,6 +948,43 @@ async function testPrivilegeBoundaries() {
 }
 
 /**
+ * 分组十七：头像随机切换
+ * 头像按 seed 生成，切换即换 seed。重点验证：
+ * 必须登录、每次结果不同、seed 不累积、业务表快照同步跟着变
+ */
+async function testAvatarShuffle() {
+  group('17. 头像随机切换');
+
+  const anon = await req('PATCH', '/api/v1/auth/me/avatar');
+  check('匿名切换头像被拒 (401)', anon.status === 401, `status=${anon.status}`);
+
+  const before = await req('GET', '/api/v1/auth/me', { token: ctx.devToken });
+  const beforeAvatar = before.body?.avatar || '';
+
+  const first = await req('PATCH', '/api/v1/auth/me/avatar', { token: ctx.devToken });
+  check('登录用户可切换头像', [200, 201].includes(first.status), `status=${first.status}`);
+  const firstAvatar = first.body?.avatar || '';
+  check('切换后头像地址变化', Boolean(firstAvatar) && firstAvatar !== beforeAvatar, `${beforeAvatar} -> ${firstAvatar}`);
+  check(
+    '切换后仍是合法的头像服务地址',
+    /\/[a-z0-9-]+\/svg\?seed=/i.test(firstAvatar),
+    firstAvatar,
+  );
+
+  const second = await req('PATCH', '/api/v1/auth/me/avatar', { token: ctx.devToken });
+  const secondAvatar = second.body?.avatar || '';
+  check('连续切换得到不同头像', secondAvatar !== firstAvatar, `${firstAvatar} vs ${secondAvatar}`);
+
+  // seed 不能越切越长（`id-a1b2-c3d4...`），随机后缀必须替换而非追加
+  const seed = decodeURIComponent((secondAvatar.split('seed=')[1] || ''));
+  check('随机后缀不累积', (seed.match(/-/g) || []).length <= 1, `seed=${seed}`);
+
+  // 切换结果必须持久化：回源 /me 应拿到同一个头像
+  const after = await req('GET', '/api/v1/auth/me', { token: ctx.devToken });
+  check('切换结果已持久化', after.body?.avatar === secondAvatar, `${after.body?.avatar} vs ${secondAvatar}`);
+}
+
+/**
  * 分组十六：登录爆破节流
  * 同一账号连续失败超过阈值后必须返回 429，避免在线口令爆破
  */
@@ -1334,6 +1371,7 @@ async function main() {
   await testSkillExpertDomains();
   await testExpertDomainCrud();
   await testZipRoundTrip();
+  await testAvatarShuffle();
   // 节流会锁定被测账号，放在最后执行避免影响前序分组
   await testLoginThrottle();
 

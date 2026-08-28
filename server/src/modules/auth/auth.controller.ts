@@ -83,6 +83,18 @@ export class AuthController {
   }
 
   /**
+   * 随机切换当前登录用户的头像
+   *
+   * 不接受 userId 参数：目标恒为会话本人，从根上排除「改别人头像」的越权路径。
+   * 也不接受前端传入的头像地址，seed 由后端生成，避免被塞进任意外链 URL。
+   */
+  @Patch('me/avatar')
+  async shuffleMyAvatar(@Req() req: Request): Promise<UserSession> {
+    const operator = this.resolveSession(req);
+    return this.authService.shuffleUserAvatar(operator.id);
+  }
+
+  /**
    * 获取企业用户列表 (供超管委任管理员与人员选择)
    *
    * 仅管理员可读：该列表包含全员工号、企业邮箱、部门与积分余额，
