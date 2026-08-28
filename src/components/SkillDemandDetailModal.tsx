@@ -452,9 +452,14 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
             {(isAuthor || isAdmin) && (
               <PopconfirmBubble
                 title="确定要删除此技能需求吗？"
-                description={isAuthor
-                  ? '您是发布者，删除后冻结的悬赏积分将退回您的账户，此操作不可撤销。'
-                  : '管理员删除：发布者的冻结积分将退回原账户，此操作不可撤销。'}
+                description={
+                  /* 后端只在 pending/approved 退还积分，已交付的积分已归属方案提交者 */
+                  demand.status === 'pending' || demand.status === 'approved'
+                    ? isAuthor
+                      ? '您是发布者，删除后冻结的悬赏积分将退回您的账户，此操作不可撤销。'
+                      : '管理员删除：发布者冻结的悬赏积分将退回原账户，此操作不可撤销。'
+                    : '该需求已交付，悬赏积分已归属方案提交者、不会退回，此操作不可撤销。'
+                }
                 type="danger"
                 confirmText="确认删除"
                 cancelText="取消"
@@ -466,7 +471,13 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
                     className="px-3.5 py-2 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 transition-colors flex items-center gap-1.5"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>{isAuthor ? '撤销并退回积分' : '管理员删除'}</span>
+                    <span>
+                      {isAuthor
+                        ? demand.status === 'pending' || demand.status === 'approved'
+                          ? '撤销并退回积分'
+                          : '撤销需求'
+                        : '管理员删除'}
+                    </span>
                   </button>
                 )}
               />

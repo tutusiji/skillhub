@@ -27,6 +27,7 @@ import { SkillDemand, UserAccount, ExpertDomain, SkillItem } from '../types';
 import { EXPERT_DOMAINS, getExpertDomainMeta } from '../data/expertDomains';
 import { useExpertDomains } from '../hooks/useExpertDomains';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { PopconfirmBubble } from './PopconfirmBubble';
 import { Avatar } from './Avatar';
 
 interface SkillDemandMarketViewProps {
@@ -72,6 +73,19 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
   const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
   // 征集管理能力 = 超管 或（管理员 且 拥有 'demands' 菜单权限）；未传时回退到旧的 isAdmin 行为
   const canManage = canManageDemands ?? isAdmin;
+
+  /**
+   * 生成删除确认气泡的说明文案。
+   *
+   * 后端 deleteDemand 只在 pending / approved 状态退还悬赏积分，已交付
+   * (fulfilled) 的积分已经归属方案提交者、不再退回。所以文案必须按状态区分，
+   * 否则管理员会以为删掉已交付需求还能把积分收回来。
+   * @param status 需求当前状态
+   */
+  const getDeleteDescription = (status: SkillDemand['status']): string =>
+    status === 'pending' || status === 'approved'
+      ? '管理员删除：发布者冻结的悬赏积分将退回原账户，此操作不可撤销。'
+      : '管理员删除：该需求已交付，悬赏积分已归属方案提交者、不会退回，此操作不可撤销。';
 
   // 专家组筛选项：后端专家数据 + 前置「全部岗位」虚拟项（不存于后端）
   const { domains: backendDomains } = useExpertDomains();
@@ -444,6 +458,36 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
                         </button>
                       )}
 
+                      {/* Admin inline delete icon (气泡走 portal，跳出卡片本身的圆角裁剪) */}
+                      {canManage && (
+                        <PopconfirmBubble
+                          title="确定要删除此技能需求吗？"
+                          description={getDeleteDescription(demand.status)}
+                          type="danger"
+                          confirmText="确认删除"
+                          cancelText="取消"
+                          placement="top-right"
+                          onConfirm={() => onDeleteDemand(demand.id)}
+                          trigger={({ onClick, isOpen }) => (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onClick(e);
+                              }}
+                              title="删除该需求"
+                              aria-label="删除该需求"
+                              className={`inline-flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${
+                                isOpen
+                                  ? 'bg-rose-50 border-rose-300 text-rose-700'
+                                  : 'bg-white border-slate-200 text-slate-400 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50/60'
+                              }`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        />
+                      )}
+
                       <span className="text-indigo-600 text-xs font-bold group-hover:translate-x-0.5 transition-transform flex items-center">
                         详情
                         <ChevronRight className="w-3.5 h-3.5" />
@@ -469,6 +513,7 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
                   <th className="py-3.5 px-4">响应数</th>
                   <th className="py-3.5 px-4">发起人</th>
                   <th className="py-3.5 px-4">截止时间</th>
+                  {canManage && <th className="py-3.5 px-4 text-right">操作</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -563,6 +608,38 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
                       <td className="py-3.5 px-4 whitespace-nowrap text-[11px] text-slate-500">
                         {demand.deadlineText || '永久有效'}
                       </td>
+
+                      {/* Admin-only inline delete (二级气泡确认，气泡走 portal 跳出表格 overflow 容器) */}
+                      {canManage && (
+                        <td className="py-3.5 px-4 whitespace-nowrap text-right">
+                          <PopconfirmBubble
+                            title="确定要删除此技能需求吗？"
+                            description={getDeleteDescription(demand.status)}
+                            type="danger"
+                            confirmText="确认删除"
+                            cancelText="取消"
+                            placement="top-right"
+                            onConfirm={() => onDeleteDemand(demand.id)}
+                            trigger={({ onClick, isOpen }) => (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onClick(e);
+                                }}
+                                title="删除该需求"
+                                aria-label="删除该需求"
+                                className={`inline-flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${
+                                  isOpen
+                                    ? 'bg-rose-50 border-rose-300 text-rose-700'
+                                    : 'bg-white border-slate-200 text-slate-400 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50/60'
+                                }`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          />
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
