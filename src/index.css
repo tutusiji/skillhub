@@ -25,14 +25,22 @@
 }
 
 /* —— Firefox ——
-   写在 `*` 上而不是只写 html：Firefox 的 scrollbar-width/color 不会从
-   根元素继承到内部滚动容器，只设 html 的话弹窗、代码区等内层滚动条仍是
-   系统默认样式。`*` 的优先级最低，`.no-scrollbar` / `.scrollbar-on-dark`
-   仍能正常覆盖。 */
-*,
-html {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+   两个关键点：
+   1) 写在 `*` 上而不是只写 html —— scrollbar-width/color 不会从根元素继承到
+      内部滚动容器，只设 html 的话弹窗、代码区等内层滚动条仍是系统默认样式。
+   2) 必须用 `@supports not selector(::-webkit-scrollbar)` 关起来 ——
+      Chromium 同时支持标准属性和 ::-webkit-scrollbar 伪元素，一旦元素上出现
+      标准属性 scrollbar-width/color，Chromium 就会「认标准、丢伪元素」，
+      让整套 ::-webkit-scrollbar 规则（含 border-radius）静默失效，
+      滚动条退回系统方形样式。实测：伪元素设 width:30px，同时写了
+      scrollbar-width 时实际宽度只有 10px（标准属性的 thin），
+      去掉后才是 30px。所以这两套写法必须互斥，不能并存。 */
+@supports not selector(::-webkit-scrollbar) {
+  *,
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
 }
 
 /* —— Chromium / Safari —— */
@@ -88,7 +96,13 @@ html {
   --scrollbar-thumb: rgb(226 232 240 / 0.22);
   --scrollbar-thumb-hover: rgb(226 232 240 / 0.38);
   --scrollbar-thumb-active: rgb(241 245 249 / 0.52);
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* 同上：scrollbar-color 只能给不支持伪元素的浏览器，否则 Chromium 会丢圆角 */
+@supports not selector(::-webkit-scrollbar) {
+  .scrollbar-on-dark {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
 }
 
 /**
