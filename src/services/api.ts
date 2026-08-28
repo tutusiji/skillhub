@@ -14,6 +14,7 @@ import type {
   UserAccount,
   UserRole,
 } from '../types';
+import { resolveAvatar } from '../utils/avatar';
 
 export const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3001'
@@ -156,7 +157,8 @@ export function mapApiSkill(skill: ApiSkill): SkillItem {
     clients: (skill.clients ?? ['claude']) as ClientPlatform[],
     author: {
       name: skill.author,
-      avatar: skill.avatar ?? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+      // 头像为空时按作者名派生，避免整列技能共用同一张兜底人像
+      avatar: resolveAvatar(skill.avatar, { name: skill.author }),
       department: skill.department ?? '技术研发中心',
       verified: false,
     },
@@ -210,7 +212,7 @@ export function mapApiUser(user: ApiUser): UserAccount {
     authProvider: user.authProvider === 'oss' ? 'oss' : 'password',
     menuPermissions: Array.isArray(user.menuPermissions) ? user.menuPermissions : [],
     role: user.role as UserRole,
-    avatar: user.avatar ?? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+    avatar: resolveAvatar(user.avatar, user),
     department: user.department,
     joinedAt: new Date().toISOString().split('T')[0],
     points: user.points ?? 10000,

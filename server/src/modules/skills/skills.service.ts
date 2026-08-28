@@ -14,6 +14,7 @@ import {
 import { AuditService } from '../audit/audit.service';
 import * as JSZip from 'jszip';
 import { shouldSeedDemoData } from '../../common/runtime-env';
+import { buildAvatarUrl } from '../../common/avatar.util';
 
 export interface FileTreeNode {
   name: string;
@@ -128,8 +129,7 @@ export class SkillsService implements OnModuleInit {
             '深度分析企业数据库 Slow Query 日志，自动评估缺失索引并生成 EXPLAIN 优化执行计划。',
           author: '陈建国 (DBA架构师)',
           department: '数据基础设施部',
-          avatar:
-            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces',
+          avatar: buildAvatarUrl('7462201'),
           version: 'v1.2.0',
           status: 'approved',
           clients: ['claude', 'cursor', 'mcp'],
@@ -167,8 +167,7 @@ export class SkillsService implements OnModuleInit {
             '实时监听 Kubernetes 集群事件，精准定位 CrashLoopBackOff 与 OOMKilled 异常根因。',
           author: '张伟 (SRE专家)',
           department: '运维保障中心',
-          avatar:
-            'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=faces',
+          avatar: buildAvatarUrl('7462202'),
           version: 'v2.1.0',
           status: 'approved',
           clients: ['claude', 'cursor', 'mcp'],
@@ -472,9 +471,10 @@ export class SkillsService implements OnModuleInit {
       author: payload.author,
       submitterId: payload.submitterId || null,
       department: payload.department || '研发中心',
+      // 头像快照：优先用调用方传入的（已是登录用户头像），否则按提交者身份派生
       avatar:
         payload.avatar ||
-        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces',
+        buildAvatarUrl(payload.submitterId || payload.author || 'anonymous'),
       version: payload.version || 'v1.0.0',
       // 统一待管理员审核：扫描通过与否都不自动上架
       status: 'pending',

@@ -7,6 +7,7 @@ import { SkillEntity } from '../../database/entities/skill.entity';
 import { SkillDemandEntity } from '../../database/entities/skill-demand.entity';
 import { FeedbackEntity } from '../../database/entities/feedback.entity';
 import { shouldSeedDemoData } from '../../common/runtime-env';
+import { buildUserAvatarUrl } from '../../common/avatar.util';
 
 /**
  * 演示数据播种服务
@@ -99,8 +100,7 @@ export class DemoDataService implements OnModuleInit {
         passwordHash: defaultHash,
         role: 'user',
         department: emp.department,
-        avatar:
-          'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+        avatar: buildUserAvatarUrl({ employeeId: emp.employeeId }),
         points: 10000,
         menuPermissions: [],
       });
@@ -158,8 +158,7 @@ export class DemoDataService implements OnModuleInit {
           '从扫描版 PDF 与图片中提取文字与表格内容，支持 OCR 识别与结构化输出，提升企业文档处理效率。',
         author: huang.name,
         department: huang.department,
-        avatar:
-          'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+        avatar: huang.avatar || buildUserAvatarUrl(huang),
         version: 'v1.0.0',
         status: 'pending',
         clients: ['claude', 'cursor'],

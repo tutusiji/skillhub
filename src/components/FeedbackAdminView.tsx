@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { FeedbackItem, UserAccount } from '../types';
 import { PopconfirmBubble } from './PopconfirmBubble';
+import { resolveAvatar } from '../utils/avatar';
 
 interface FeedbackAdminViewProps {
   currentUser: UserAccount;
@@ -133,7 +134,10 @@ export const FeedbackAdminView: React.FC<FeedbackAdminViewProps> = ({
                 <div key={item.id} className="p-4 sm:p-5 hover:bg-slate-50/80 transition-colors">
                   <div className="flex items-start gap-3.5">
                     <img
-                      src={item.submitterAvatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80'}
+                      src={resolveAvatar(item.submitterAvatar, {
+                        employeeId: item.submitterEmployeeId,
+                        name: item.userName,
+                      })}
                       alt={item.userName}
                       className="w-10 h-10 rounded-xl object-cover border border-slate-200 shrink-0"
                     />
