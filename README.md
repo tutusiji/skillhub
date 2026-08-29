@@ -12,8 +12,9 @@
   - 随时安装任意技能：`/plugin install <plugin-name>@skillhub`
 - 🛡️ **双引擎安全风控沙箱**：
   - **引擎 1（正则特征库）**：毫秒级拦截硬编码密钥、敏感文件窃取、提权命令与内网 SSRF 风险；
-  - **引擎 2（DeepSeek-V3 LLM 语义推理）**：深度研判 Prompt 注入、混淆越狱与隐蔽数据外发。
+  - **引擎 2（DeepSeek-V4 LLM 语义推理）**：深度研判 Prompt 注入、混淆越狱与隐蔽数据外发。
 - 📦 **自动化 Git 同步发布管道**：Web 端上传 ZIP 源码包，审核通过后自动规范化解压、自动更新 `marketplace.json`、自动生成 Git Commit。
+- 🧬 **多版本发布与元数据自编辑**：同一插件支持多版本共存/替换（`coexist` / `replace`），审核通过自动归档父版本并继承计数，作者可自编辑元数据，管理员可回滚链上历史版本。
 - 💻 **多客户端兼容**：同时支持 Claude Code、Cursor、MCP Server 协议与企业级 SkillHub CLI。
 
 ---
@@ -31,7 +32,7 @@
 │ ┌─────────────────────────────────────────────────────────┐ │
 │ │ Git 市场模块 (isomorphic-git, /skillhub.git)            │ │
 │ │ 技能生命周期 (ZIP 解析, 文件树索引, 版本分发)             │ │
-│ │ 双引擎风控网关 (Regex 规则库 + DeepSeek-V3 语义研判)    │ │
+│ │ 双引擎风控网关 (Regex 规则库 + DeepSeek-V4 语义研判)    │ │
 │ │ 多端安装协议转换器 (Claude / Cursor / MCP / CLI)         │ │
 │ └─────────────────────────────────────────────────────────┘ │
 └──────────────────────────────┬──────────────────────────────┘
@@ -152,8 +153,8 @@ pnpm run dev
 
 ```bash
 pnpm run lint             # tsc --noEmit，本项目唯一的「lint」
-pnpm run test:regression  # API 回归断言（当前约 282 条，随市场插件数波动），需后端已在运行
-pnpm run test:plugin-e2e  # 调真实 claude CLI 走完市场添加→安装→卸载全链路（当前 165 条断言）；未装 claude 会跳过
+pnpm run test:regression  # API 回归断言（当前约 360 条，随市场插件数波动），需后端已在运行
+pnpm run test:plugin-e2e  # 调真实 claude CLI 走完市场添加→安装→卸载全链路（当前约 171 条断言）；未装 claude 会跳过
 pnpm run test:all         # 上面三个串起来
 ```
 

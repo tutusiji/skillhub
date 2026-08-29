@@ -98,8 +98,8 @@ remotePort = 17300
 部署或升级后建议跑一遍：
 
 ```bash
-pnpm run test:regression                          # API 回归断言（当前约 331 条，随市场插件数波动）
-pnpm run test:plugin-e2e                          # 165 条真实 claude CLI 插件安装断言
+pnpm run test:regression                          # API 回归断言（当前约 360 条，随市场插件数波动）
+pnpm run test:plugin-e2e                          # 约 171 条真实 claude CLI 插件安装断言
 node scripts/regression-test.mjs https://souxy.com:7300   # 顺带验证公网隧道
 ```
 
