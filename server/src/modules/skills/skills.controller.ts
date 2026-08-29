@@ -18,6 +18,11 @@ import {
 import { Request, Response } from 'express';
 import { SkillsService } from './skills.service';
 import { SkillEntity } from '../../database/entities/skill.entity';
+import {
+  AuditService,
+  AuditReportResult,
+  AuditReportView,
+} from '../audit/audit.service';
 import { AuthService, UserSession } from '../auth/auth.service';
 import { shouldCountMetric } from '../../common/metric-throttle';
 
@@ -29,6 +34,7 @@ export class SkillsController {
   constructor(
     private readonly skillsService: SkillsService,
     private readonly authService: AuthService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -77,6 +83,43 @@ export class SkillsController {
     @Req() req?: Request,
   ): Promise<SkillEntity[]> {
     return this.skillsService.findVersions(id, this.optionalSession(req));
+  }
+
+  /**
+   * 获取技能最近一次双引擎体检报告明细（正则命中 + LLM 语义研判）
+   * 与 findBySlug 同源的可见性规则：已上架公开，未上架仅 owner / admin 可见
+   * @param id 技能 ID 或 slug
+   */
+  @Get(':id/audit-report')
+  async getSkillAuditReport(
+    @Param('id') id: string,
+    @Req() req?: Request,
+  ): Promise<AuditReportView> {
+    const skill = await this.skillsService.findBySlug(
+      id,
+      this.optionalSession(req),
+    );
+    return this.auditService.getSkillAuditReport(skill.id, skill);
+  }
+
+  /**
+   * 管理员「保存扫描结果」：把审核工作台刚跑出的双引擎体检结果落库，
+   * 并回写技能的 auditScore。未保存前 audit_reports 中没有该技能的报告，
+   * 详情页/列表拉取不到；保存后审批门槛（auditScore 非空）才满足。
+   * @param id 技能 ID
+   * @param body 工作台扫描出的 AuditReportResult（与 sandbox-scan 响应同构）
+   */
+  @Post(':id/audit-report')
+  async saveAuditReport(
+    @Param('id') id: string,
+    @Body() body: { result: AuditReportResult },
+    @Req() req?: Request,
+  ): Promise<SkillEntity> {
+    this.assertPrivileged(req, '保存体检扫描结果');
+    if (!body?.result || typeof body.result.score !== 'number') {
+      throw new BadRequestException('缺少有效的体检扫描结果');
+    }
+    return this.skillsService.saveAuditReport(id, body.result);
   }
 
   /**
@@ -286,7 +329,11 @@ export class SkillsController {
   }
 
   /**
-   * 管理员彻底删除技能并重建 Git 市场索引
+   * 彻底删除技能/版本并重建 Git 市场索引
+   *
+   * 权限由 service 按操作者角色裁决：
+   *   - 管理员可删除任意状态；
+   *   - 作者仅可删除自己提交的 rejected 版本（个人中心「版本记录」的清理入口）。
    * @param id 技能 ID
    */
   @Delete(':id')
@@ -294,8 +341,8 @@ export class SkillsController {
     @Param('id') id: string,
     @Req() req?: Request,
   ): Promise<{ success: boolean; id: string }> {
-    this.assertPrivileged(req, '删除技能');
-    return this.skillsService.deleteSkill(id);
+    const session = this.resolveSession(req);
+    return this.skillsService.deleteSkill(id, session);
   }
 
   /**

@@ -8,6 +8,16 @@
   "version": "1.0.0",
   "plugins": [
     {
+      "name": "dev-expert",
+      "description": "编程专家 - dev-expert",
+      "version": "v1.0.1",
+      "source": "./plugins/dev-expert",
+      "category": "coding",
+      "author": {
+        "name": "黄坤"
+      }
+    },
+    {
       "name": "superpowers",
       "description": "全能开发套件 — 项目规划、代码编写、Code Review 等全流程辅助，帮你系统化梳理需求和任务。TDD、调试、协作模式、规格驱动开发、子代理驱动实现。作者 Jesse Vincent (obra)。",
       "version": "v1.0.0",

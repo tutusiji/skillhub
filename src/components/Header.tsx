@@ -42,6 +42,8 @@ interface HeaderProps {
   mySubmissionsCount?: number;
   isSuperAdmin?: boolean;
   backendOnline?: boolean | null;
+  /** 会话回源中（刷新后 /auth/me 尚未返回）：用户区显示占位，避免「登录账号」按钮一闪而过 */
+  authLoading?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -57,7 +59,8 @@ export const Header: React.FC<HeaderProps> = ({
   openDemandsCount = 0,
   starredCount = 0,
   mySubmissionsCount = 0,
-  backendOnline = null
+  backendOnline = null,
+  authLoading = false
 }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -229,8 +232,20 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* User Profile Dropdown OR Login Button */}
-          {currentUser ? (
+          {/* User Profile Dropdown OR Login Button（回源中显示骨架占位） */}
+          {authLoading ? (
+            <div
+              className="flex items-center gap-2 p-1.5"
+              title="正在恢复登录状态…"
+              aria-hidden="true"
+            >
+              <div className="w-8 h-8 rounded-xl bg-slate-200 animate-pulse border border-slate-200" />
+              <div className="hidden xl:block space-y-1.5">
+                <div className="w-16 h-2.5 rounded bg-slate-200 animate-pulse" />
+                <div className="w-10 h-2 rounded bg-slate-200 animate-pulse" />
+              </div>
+            </div>
+          ) : currentUser ? (
             <div className="relative" ref={menuRef}>
               <button
                 onClick={() => setShowUserMenu(!showUserMenu)}

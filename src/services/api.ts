@@ -1,4 +1,5 @@
 import type {
+  AuditExecutionSummary,
   AuditRule,
   ClientPlatform,
   ExpertDomain,
@@ -134,17 +135,39 @@ export interface ApiSkill {
   expertDomain?: string;
   expertDomains?: string[];
   auditScore?: number;
+  /** 权威放行判定（后端按最近一次已保存体检报告回传；未体检为 null） */
+  auditStatus?: 'passed' | 'warning' | 'failed' | 'pending' | null;
   reviewedBy?: string | null;
   reviewedAt?: string | null;
   adminFeedback?: string | null;
   zipFileName?: string | null;
   zipBlob?: string | null;
+  /** 版本链：当前版本指向其前驱版本（第一版为 null）；同一插件所有版本共享根 slug */
+  parentSkillId?: string | null;
+  /** 版本链：已归档版本指向替代它的 approved 版本 */
+  supersededById?: string | null;
+  /** 版本链：被新版替代的时间戳（archived 状态时填入） */
+  archivedAt?: string | null;
+  /** 版本链：'replace' = 替代旧版归档；'coexist' = 旧版保留 approved 独立计数 */
+  supersedeMode?: 'coexist' | 'replace' | null;
   createdAt?: string;
   updatedAt?: string;
 }
 
 export function mapApiSkill(skill: ApiSkill): SkillItem {
-  const score = skill.auditScore ?? 100;
+  // 未体检技能（auditScore 为空）不虚构分数：显示「待体检」，列表/详情/审批都不出分
+  const score = skill.auditScore ?? null;
+  // 权威判定优先取后端回传的 auditStatus（引擎语义结论），
+  // 只有旧数据缺该字段时才按得分兜底推断，避免前端阈值与引擎结论打架
+  const overallStatus: AuditExecutionSummary['overallStatus'] =
+    skill.auditStatus ??
+    (score == null
+      ? 'pending'
+      : score >= 90
+        ? 'passed'
+        : score >= 70
+          ? 'warning'
+          : 'failed');
   return {
     id: skill.id,
     slug: skill.slug,
@@ -170,13 +193,17 @@ export function mapApiSkill(skill: ApiSkill): SkillItem {
     updatedAt: skill.updatedAt ?? skill.createdAt ?? new Date().toISOString(),
     status: (skill.status ?? 'pending') as SkillItem['status'],
     permissions: skill.permissions ?? [],
+    parentSkillId: skill.parentSkillId ?? null,
+    supersededById: skill.supersededById ?? null,
+    archivedAt: skill.archivedAt ?? null,
+    supersedeMode: skill.supersedeMode ?? null,
     readme: skill.readme || skill.description,
     expertDomain: (skill.expertDomain as SkillItem['expertDomain']) ?? undefined,
     expertDomains: Array.isArray(skill.expertDomains) ? skill.expertDomains : [],
     fileTree: normalizeFileTree(skill.fileTree ?? []),
     installCommands: skill.installCommands,
     auditResults: {
-      overallStatus: score >= 90 ? 'passed' : score >= 70 ? 'warning' : 'failed',
+      overallStatus,
       score,
       scannedAt: skill.updatedAt ?? new Date().toISOString(),
       regexResults: [],
@@ -398,6 +425,8 @@ export interface ApiSandboxScanResult {
 
 /** 后端返回的 LLM 审核引擎配置视图 (apiKey 仅有掩码，无明文) */
 export interface ApiLlmConfig {
+  /** 网关协议：'openai' 兼容 /chat/completions，或 'anthropic' Messages API */
+  protocol: 'openai' | 'anthropic';
   baseUrl: string;
   apiKeyMask: string;
   hasApiKey: boolean;
@@ -432,6 +461,17 @@ export const api = {
    */
   async getSkill(slugOrId: string): Promise<ApiSkill> {
     return apiFetch<ApiSkill>(`/api/v1/skills/${encodeURIComponent(slugOrId)}`);
+  },
+
+  /**
+   * 拉取技能最近一次双引擎体检报告明细（正则命中 + LLM 语义研判）
+   * 与详情接口同源的可见性规则；历史技能无关联报告时返回仅含分数的摘要
+   * 返回即前端 AuditExecutionSummary 同构，无需再映射
+   */
+  async getSkillAuditReport(slugOrId: string): Promise<AuditExecutionSummary> {
+    return apiFetch<AuditExecutionSummary>(
+      `/api/v1/skills/${encodeURIComponent(slugOrId)}/audit-report`,
+    );
   },
   async listUsers(): Promise<ApiUser[]> {
     return apiFetch<ApiUser[]>('/api/v1/auth/users');
@@ -709,9 +749,11 @@ export const api = {
   },
 
   /**
-   * 调用后端双引擎沙箱扫描（正则规则 + 真实 LLM 语义研判）
+   * 调用后端双引擎沙箱扫描（正则规则 + 真实 LLM 语义研判）。
+   * 注意：该接口只扫描不落库，需用 saveAuditReport 显式保存后，
+   * audit_reports 中才有该技能的体检记录，其他地方才能拉取到。
    * @param payload 待审核的代码或 Prompt 全文
-   * @param skillId 可选关联技能 ID，用于落库体检快照
+   * @param skillId 可选关联技能 ID
    */
   async runSandboxScan(
     payload: string,
@@ -720,6 +762,21 @@ export const api = {
     return apiFetch<ApiSandboxScanResult>('/api/v1/audit/sandbox-scan', {
       method: 'POST',
       body: JSON.stringify({ payload, skillId }),
+    });
+  },
+
+  /**
+   * 管理员「保存扫描结果」：把审核工作台刚跑出的体检结果落库并回写 auditScore。
+   * @param id 技能 ID
+   * @param result 工作台扫描出的 ApiSandboxScanResult（与后端 AuditReportResult 同构）
+   */
+  async saveAuditReport(
+    id: string,
+    result: ApiSandboxScanResult,
+  ): Promise<ApiSkill> {
+    return apiFetch<ApiSkill>(`/api/v1/skills/${id}/audit-report`, {
+      method: 'POST',
+      body: JSON.stringify({ result }),
     });
   },
 
@@ -736,6 +793,7 @@ export const api = {
    * @param payload 待更新的配置字段
    */
   async updateLlmConfig(payload: {
+    protocol?: 'openai' | 'anthropic';
     baseUrl?: string;
     apiKey?: string | null;
     modelName?: string;

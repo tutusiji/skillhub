@@ -6,13 +6,16 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+import { Repository, Like, Not, IsNull } from 'typeorm';
 import { SkillEntity } from '../../database/entities/skill.entity';
 import {
   GitMarketService,
   toPluginName,
 } from '../git-market/git-market.service';
-import { AuditService } from '../audit/audit.service';
+import {
+  AuditService,
+  AuditReportResult,
+} from '../audit/audit.service';
 import * as JSZip from 'jszip';
 import { shouldSeedDemoData } from '../../common/runtime-env';
 import { buildAvatarUrl } from '../../common/avatar.util';
@@ -63,6 +66,11 @@ const LIST_SKILL_COLUMNS = [
   'reviewedBy',
   'reviewedAt',
   'adminFeedback',
+  // 多版本发布：版本链关系（详情页版本选择器 / 前端判定 owner 依赖这些字段）
+  'parentSkillId',
+  'supersededById',
+  'archivedAt',
+  'supersedeMode',
   'createdAt',
   'updatedAt',
 ] as (keyof SkillEntity)[];
@@ -101,7 +109,19 @@ export class SkillsService implements OnModuleInit {
     // 已上架技能会从 marketplace.json 消失导致客户端装不到，此处启动即自愈
     if (count > 0) {
       // 自愈失败不应阻断启动：Git 市场是可重建的运行时数据，
-      // 而 API 与前端必须先能起来（否则整站不可用）
+      // 而 API 与前端必须先能起来（否则整站不可用）。
+      // 顺序重要：必须先统一版本行 slug（插件身份 = 版本链，对外同名），
+      // 再做 Git 市场对齐 —— 否则 git reconcile 会按旧 slug（如 dev-expert-2）
+      // 判断"插件已上架且目录合法"而跳过修复，随后 slug 被改写、重建索引时
+      // 又会把旧 slug 目录当残留删掉，留下"清单有插件、目录却没有"的坏状态。
+      try {
+        await this.reconcilePluginSlugs();
+      } catch (error) {
+        console.warn(
+          '⚠️  插件 slug 自愈失败，服务继续启动:',
+          (error as Error).message,
+        );
+      }
       try {
         await this.reconcileGitMarketOnBoot();
       } catch (error) {
@@ -273,6 +293,17 @@ export class SkillsService implements OnModuleInit {
       );
     }
 
+    // 附带权威放行判定：前端列表/卡片据此显示「准予上线/存在告警/严重违规」，
+    // 不再按 auditScore 自行推断（推断阈值与引擎语义结论可能不一致，会误导审核）。
+    // 这是只读回显字段，不属于 skills 表列，不参与持久化。
+    const statuses = await this.auditService.getLatestReportStatuses(
+      skills.map((s) => s.id),
+    );
+    for (const skill of skills) {
+      (skill as SkillEntity & { auditStatus?: string | null }).auditStatus =
+        statuses.get(skill.id) ?? null;
+    }
+
     return skills;
   }
 
@@ -292,12 +323,29 @@ export class SkillsService implements OnModuleInit {
     options: { includeArchived?: boolean } = {},
   ): Promise<SkillEntity> {
     const clean = slugOrId.startsWith('@') ? slugOrId : `@skillhub/${slugOrId}`;
-    const skill = await this.skillRepository.findOne({
+    const rows = await this.skillRepository.find({
       where: [{ slug: slugOrId }, { slug: clean }, { id: slugOrId }],
       // 详情页需要文件树做源码预览；原始 ZIP 仍走 /skills/:id/zip 下载
       select: DETAIL_SKILL_COLUMNS,
     });
 
+    // 按 id 查询始终精确返回该行；按 slug 查询可能命中同一插件的多个版本
+    // （子版本共享根 slug），此时取「当前对外版本」= 最新已上架，否则最新一条
+    // （对 owner/admin 可见的待审/驳回版本也由此解析）。
+    let skill: SkillEntity | null = rows.find((r) => r.id === slugOrId) ?? null;
+    if (!skill) {
+      const slugRows = rows.filter(
+        (r) => r.slug === slugOrId || r.slug === clean,
+      );
+      if (slugRows.length === 0) {
+        throw new NotFoundException(`未找到指定技能: ${slugOrId}`);
+      }
+      const approved = slugRows
+        .filter((r) => r.status === 'approved')
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      slugRows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      skill = approved.length > 0 ? approved[0] : slugRows[0];
+    }
     if (!skill) {
       throw new NotFoundException(`未找到指定技能: ${slugOrId}`);
     }
@@ -320,6 +368,11 @@ export class SkillsService implements OnModuleInit {
     ) {
       throw new NotFoundException(`未找到指定技能: ${slugOrId}`);
     }
+
+    // 附带权威放行判定（只读回显字段，非表列），前端详情/工作台据此展示体检结论，
+    // 不再按 auditScore 自行推断（推断阈值与引擎语义结论可能不一致，会误导审核）
+    (skill as SkillEntity & { auditStatus?: string | null }).auditStatus =
+      await this.auditService.getLatestReportStatus(skill.id);
     return skill;
   }
 
@@ -432,23 +485,11 @@ export class SkillsService implements OnModuleInit {
   }
 
   /**
-   * 递归展平文件树中的文本内容，用于扩大风控扫描覆盖面
-   * @param nodes 文件树节点列表
-   */
-  private flattenFileContents(nodes: FileTreeNode[] = []): string {
-    const chunks: string[] = [];
-    for (const node of nodes) {
-      if (node.content) chunks.push(node.content);
-      if (node.children?.length) {
-        chunks.push(this.flattenFileContents(node.children));
-      }
-    }
-    return chunks.join('\n');
-  }
-
-  /**
-   * 归一化技能 slug 并确保数据库唯一
-   * slug 缺省时基于技能名称派生；若已被占用则追加自增后缀，避免 UNIQUE 约束报 500
+   * 归一化技能 slug 并确保插件身份不冲突（仅用于「全新插件」）
+   *
+   * 同一插件的子版本共享根 slug（见 createSkill），因此冲突检测只统计
+   * 根版本（parent_skill_id IS NULL）：多版本插件不会把同名新插件的后缀
+   * 从 -2 顶成 -4/-5。slug 缺省时基于技能名称派生，冲突则追加自增后缀。
    * @param rawSlug 前端传入的原始 slug (可为空)
    * @param name 技能名称，用于兜底派生
    */
@@ -474,12 +515,16 @@ export class SkillsService implements OnModuleInit {
     }
 
     // 3. 冲突检测：同名 slug 已存在时追加自增序号
+    //    只统计根版本（parent_skill_id IS NULL）：插件身份 = 版本链根 slug，
+    //    子版本共享 slug 不应占用冲突名额，否则重名新插件会拿到 -4/-5。
     let candidate = base;
     let suffix = 1;
     while (
-      (await this.skillRepository.countBy({
-        slug: `@skillhub/${candidate}`,
-      })) > 0
+      (await this.skillRepository
+        .createQueryBuilder('s')
+        .where('s.slug = :slug', { slug: `@skillhub/${candidate}` })
+        .andWhere('s.parent_skill_id IS NULL')
+        .getCount()) > 0
     ) {
       suffix += 1;
       candidate = `${base}-${suffix}`;
@@ -561,11 +606,31 @@ export class SkillsService implements OnModuleInit {
       }
     }
 
-    // slug 允许省略：由技能名称自动派生，并保证全局唯一 (避免 UNIQUE 约束 500)
-    const { cleanSlug, fullSlug } = await this.resolveUniqueSlug(
-      payload.slug,
-      payload.name,
-    );
+    // slug：版本更新沿用根版本的 slug（插件对外身份 = 版本链，升级后仍同名，
+    // 如 dev-expert 升级后仍是 dev-expert 而非 dev-expert-2）；只有全新插件
+    // 才按名称派生并保证插件身份不冲突（同名才追加 -2）。
+    let cleanSlug: string;
+    let fullSlug: string;
+    if (payload.parentSkillId && parent) {
+      let root: SkillEntity | null = parent;
+      while (root.parentSkillId) {
+        const ancestor: SkillEntity | null =
+          await this.skillRepository.findOne({
+            where: { id: root.parentSkillId },
+          });
+        if (!ancestor) break;
+        root = ancestor;
+      }
+      fullSlug = root?.slug || parent.slug;
+      cleanSlug = fullSlug.replace(/^@skillhub\//, '');
+    } else {
+      const resolved = await this.resolveUniqueSlug(
+        payload.slug,
+        payload.name,
+      );
+      cleanSlug = resolved.cleanSlug;
+      fullSlug = resolved.fullSlug;
+    }
 
     // 文件树优先级：前端传入的 fileTree（含文本内容，供详情预览）> ZIP 结构解析 > 默认模板
     // 注意：zipBuffer 解析只生成目录结构不读内容，若用它覆盖前端 fileTree 会导致文件预览丢失内容
@@ -584,18 +649,8 @@ export class SkillsService implements OnModuleInit {
       ];
     }
 
-    // 触发双引擎风控扫描：将描述、README 与文件内容一并纳入扫描面
-    // 注意：扫描结果只作为评分与风控参考落库（auditScore），不决定上架状态——
-    // 所有新提交一律进入管理员人工审核队列，由管理员审核通过后才上架并发布 Git
-    const scanPayload = [
-      payload.description,
-      payload.readme || '',
-      this.flattenFileContents(fileTree),
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-    const scanResult = await this.auditService.runDualEngineScan(scanPayload);
+    // 生成技能 ID（技能主键；体检报告经「保存扫描结果」动作后才关联回技能）
+    const skillId = `skill-${Date.now()}`;
 
     // "替代旧版"模式：counter 起点从父版本继承（parent 后续不重置）
     const inheritCounters =
@@ -607,7 +662,7 @@ export class SkillsService implements OnModuleInit {
     const seedDownloads = inheritCounters ? parent!.downloads : 0;
 
     const newSkill = this.skillRepository.create({
-      id: `skill-${Date.now()}`,
+      id: skillId,
       name: payload.name,
       slug: fullSlug,
       category: payload.category || 'coding',
@@ -643,7 +698,9 @@ export class SkillsService implements OnModuleInit {
       // 保留开发者填写的完整说明文档与适用专家组，避免详情页回显丢失
       readme: payload.readme || payload.description,
       expertDomain: payload.expertDomain || null,
-      auditScore: scanResult.score,
+      // 提交时不做体检：auditScore 置空，只有管理员在审核工作台运行体检并
+      // 「保存扫描结果」后才落库得分，未体检技能不展示得分、不可审批上架
+      auditScore: null,
       // 保留原始 ZIP（base64）与上传文件名，供无损下载与 Git 市场发布使用
       zipBlob: payload.zipBuffer
         ? typeof payload.zipBuffer === 'string'
@@ -682,6 +739,14 @@ export class SkillsService implements OnModuleInit {
     const skill = await this.skillRepository.findOne({ where: { id } });
     if (!skill) throw new NotFoundException('未找到对应待审核技能');
 
+    // 审批门槛：必须先在工作台运行双引擎体检并「保存扫描结果」，
+    // 未保存（auditScore 仍为空）的技能不允许批准上架，防止未检品流入市场
+    if (skill.auditScore == null) {
+      throw new BadRequestException(
+        '请先在审核工作台运行双引擎安全体检并保存扫描结果后，再批准上架',
+      );
+    }
+
     skill.status = 'approved';
     skill.reviewedBy = reviewer || '系统管理员';
     skill.reviewedAt = new Date().toISOString();
@@ -713,6 +778,29 @@ export class SkillsService implements OnModuleInit {
       updated.version,
     );
     return this.stripZipBlob(updated);
+  }
+
+  /**
+   * 管理员「保存扫描结果」：把审核工作台刚跑出的双引擎体检结果落库，
+   * 并同步回写技能的 auditScore（审批门槛即 auditScore 非空）。
+   *
+   * 落库后该技能才有已保存报告，详情页/列表/版本链才能拉取到这份检测结果。
+   * @param id 技能 ID
+   * @param result 工作台扫描出的 AuditReportResult（与 sandbox-scan 响应同构）
+   */
+  async saveAuditReport(
+    id: string,
+    result: AuditReportResult,
+  ): Promise<SkillEntity> {
+    const skill = await this.skillRepository.findOne({ where: { id } });
+    if (!skill) throw new NotFoundException('未找到对应技能');
+
+    // 1. 落库体检报告行（audit_reports）
+    await this.auditService.saveAuditReport(id, result);
+
+    // 2. 回写技能得分，作为「已体检」标记与审批门槛
+    skill.auditScore = result.score;
+    return this.stripZipBlob(await this.skillRepository.save(skill));
   }
 
   /**
@@ -822,14 +910,66 @@ export class SkillsService implements OnModuleInit {
   }
 
   /**
-   * 管理员彻底删除技能记录并刷新 Git 市场索引
+   * 彻底删除技能/版本记录并刷新 Git 市场索引
+   *
+   * 权限（控制器先解析会话，此处按角色二次校验）：
+   *   - 管理员可删除任意状态（审计清理 / 误传清理）
+   *   - 作者仅可删除自己提交的 rejected 版本（驳回"死信"由作者整改清理）
+   *
+   * 删除前会把该版本的子版本重挂到其父节点，保证版本链不断裂、根始终唯一
+   * （否则子版本会失去链头，slug 归属也随根消失而漂移）。
+   * 删除后顺带清理 audit_reports 孤儿行（skill_id 无外键约束，不会级联）。
    * @param id 技能 ID
+   * @param actor 操作者会话（null = 未做角色校验的调用方，按无权限处理）
    */
-  async deleteSkill(id: string): Promise<{ success: boolean; id: string }> {
+  async deleteSkill(
+    id: string,
+    actor?: { id: string; role: string } | null,
+  ): Promise<{ success: boolean; id: string }> {
+    const isPrivileged =
+      actor?.role === 'admin' || actor?.role === 'super_admin';
     const skill = await this.skillRepository.findOne({ where: { id } });
-    if (!skill) throw new NotFoundException('未找到对应技能');
+
+    if (!isPrivileged) {
+      // 作者删除：技能不存在也一律 403（不对外确认技能存在性，与既有回归契约一致）
+      if (!skill) {
+        throw new ForbiddenException('仅技能作者或管理员可删除该版本');
+      }
+      // 仅限本人 + rejected 状态（待审/上架版本需走管理员或驳回流程）
+      if (!actor?.id || skill.submitterId !== actor.id) {
+        throw new ForbiddenException('仅技能作者或管理员可删除该版本');
+      }
+      if (skill.status !== 'rejected') {
+        throw new ForbiddenException(
+          '作者仅可删除已被驳回的版本，其他状态请交由管理员处理',
+        );
+      }
+    } else if (!skill) {
+      throw new NotFoundException('未找到对应技能');
+    }
+
+    // 子版本重挂到被删节点的父节点，保持版本链完整（根仍唯一）
+    const children = await this.skillRepository.find({
+      where: { parentSkillId: id },
+    });
+    if (children.length > 0) {
+      await this.skillRepository
+        .createQueryBuilder()
+        .update(SkillEntity)
+        .set({ parentSkillId: skill.parentSkillId })
+        .where('parent_skill_id = :id', { id })
+        .execute();
+    }
 
     await this.skillRepository.remove(skill);
+
+    // 清理 audit_reports 孤儿行（skill_id 无外键约束，需显式删除）
+    try {
+      await this.auditService.clearAuditReportsForSkill(id);
+    } catch {
+      // 报告清理失败不阻断删除主体
+    }
+
     await this.rebuildGitMarketIndex();
     return { success: true, id };
   }
@@ -839,15 +979,26 @@ export class SkillsService implements OnModuleInit {
    * 覆盖 storage/git-marketplace 被删除/损坏，或历史清单缺少 owner 字段的场景
    */
   private async reconcileGitMarketOnBoot(): Promise<void> {
+    // 同一插件多版本共享 slug：Git 市场每插件只保留一个目录，取最新已上架版本
+    // （倒序遍历 + 按 slug 去重，避免旧版本覆盖新版本目录）
     const approved = await this.skillRepository.find({
       where: { status: 'approved' },
+      order: { createdAt: 'DESC' },
     });
     if (approved.length === 0) return;
+
+    const deduped: SkillEntity[] = [];
+    const seenSlugs = new Set<string>();
+    for (const skill of approved) {
+      if (seenSlugs.has(skill.slug)) continue;
+      seenSlugs.add(skill.slug);
+      deduped.push(skill);
+    }
 
     const manifest = this.gitMarketService.getMarketplaceManifest();
     const indexed = new Set(manifest.plugins.map((p) => p.name));
     // 除了清单缺条目，还要检查插件目录结构是否符合最新 Claude Code schema
-    const missing = approved.filter((skill) => {
+    const missing = deduped.filter((skill) => {
       const cleanSlug = toPluginName(skill.slug);
       if (!indexed.has(cleanSlug)) return true;
       return !this.gitMarketService.isPluginLayoutValid(cleanSlug);
@@ -878,8 +1029,51 @@ export class SkillsService implements OnModuleInit {
     await this.rebuildGitMarketIndex();
 
     console.log(
-      `🔧 Git 市场索引已自愈：修复/补齐 ${repaired}/${missing.length} 个已上架插件 (共 ${approved.length} 个在线)`,
+      `🔧 Git 市场索引已自愈：修复/补齐 ${repaired}/${missing.length} 个已上架插件 (共 ${deduped.length} 个在线插件)`,
     );
+  }
+
+  /**
+   * 启动自愈：把存量子版本的 slug 统一为根版本（插件）的 slug
+   *
+   * 历史版本行各自持有唯一 slug（如 dev-expert-2 / skill-<ts>），与
+   * 「插件身份 = 版本链、升级保持同名」的新模型不一致。此处在类型列
+   * 去唯一约束后（synchronize 先于 onModuleInit 执行）幂等地把每个子版本
+   * 沿 parent_skill_id 链回溯到根，改写为根 slug 并重建 installCommands
+   * （模板与 createSkill 完全一致）。
+   */
+  private async reconcilePluginSlugs(): Promise<void> {
+    const children = await this.skillRepository.find({
+      where: { parentSkillId: Not(IsNull()) },
+    });
+    let repaired = 0;
+    for (const child of children) {
+      let root: SkillEntity | null = child;
+      while (root.parentSkillId) {
+        const ancestor: SkillEntity | null =
+          await this.skillRepository.findOne({
+            where: { id: root.parentSkillId },
+          });
+        if (!ancestor) break;
+        root = ancestor;
+      }
+      if (!root || root.slug === child.slug) continue;
+      const cleanSlug = root.slug.replace(/^@skillhub\//, '');
+      child.slug = root.slug;
+      child.installCommands = {
+        claude: `/plugin install ${cleanSlug}@skillhub`,
+        cursor: `cursor ext install ${cleanSlug}`,
+        mcp: `claude mcp add ${cleanSlug} -- npx -y @skillhub/${cleanSlug}`,
+        cli: `npx @skillhub/cli install ${root.slug}`,
+      };
+      await this.skillRepository.save(child);
+      repaired += 1;
+    }
+    if (repaired > 0) {
+      console.log(
+        `🔧 插件 slug 自愈：已把 ${repaired} 条子版本统一为根插件 slug`,
+      );
+    }
   }
 
   /**
@@ -1130,14 +1324,11 @@ export class SkillsService implements OnModuleInit {
       return this.stripZipBlob(skill);
     }
 
-    // 4. name 改了要重新派生 slug，保持 slug 唯一性；旧 slug 仍可经 id 回查
-    if (updates.name && updates.name !== skill.name) {
-      const { fullSlug } = await this.resolveUniqueSlug(
-        skill.slug,
-        updates.name,
-      );
-      updates.slug = fullSlug;
-    }
+    // 4. 插件 slug 是稳定身份（= 版本链根 slug，对外安装命令/深链依赖它），
+    //    改 name 只影响展示名称，不重派生 slug —— 插件身份不随改名漂移；
+    //    想换全新身份应作为新插件单独发布。
+    //    （此前在此处重新 resolveUniqueSlug 会把自身也算作冲突，每次改名
+    //     都让 slug 追加 -2/-3，与「版本更新保持同名」的模型相悖。）
 
     Object.assign(skill, updates);
     const saved = await this.skillRepository.save(skill);

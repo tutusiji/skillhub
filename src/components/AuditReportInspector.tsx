@@ -22,13 +22,20 @@ interface AuditReportInspectorProps {
   onReScan?: () => void;
   isScanning?: boolean;
   onViewFileInTree?: (filePath: string) => void;
+  /**
+   * 是否展示管理员终审反馈块，默认 true。
+   * 详情页对普通用户隐藏：已上架技能的反馈是「审核通过」这类泛化文案，
+   * 无信息量；驳回理由详情页上方已有独立「管理员驳回意见」块，此处置为冗余。
+   */
+  showAdminFeedback?: boolean;
 }
 
 export const AuditReportInspector: React.FC<AuditReportInspectorProps> = ({
   summary,
   onReScan,
   isScanning = false,
-  onViewFileInTree
+  onViewFileInTree,
+  showAdminFeedback = true,
 }) => {
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
   const [activeEngineTab, setActiveEngineTab] = useState<'all' | 'regex' | 'llm'>('all');
@@ -105,17 +112,24 @@ export const AuditReportInspector: React.FC<AuditReportInspectorProps> = ({
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-extrabold text-2xl shadow-2xs ${
-              summary.score >= 90 
-                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                : summary.score >= 60 
-                ? 'bg-amber-50 text-amber-700 border border-amber-200' 
-                : 'bg-rose-50 text-rose-700 border border-rose-200'
+              summary.overallStatus === 'pending'
+                ? 'bg-slate-100 text-slate-500 border border-slate-200'
+                : summary.overallStatus === 'failed'
+                ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                : summary.overallStatus === 'warning'
+                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
             }`}>
-              {summary.score}
+              {summary.score ?? '未'}
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-base font-extrabold text-slate-900 tracking-tight">双引擎安全与合规审计报告</h3>
+                {summary.overallStatus === 'pending' && (
+                  <span className="bg-slate-100 text-slate-700 text-xs px-2.5 py-0.5 rounded-full border border-slate-300 flex items-center gap-1 font-bold">
+                    <ShieldCheck className="w-3.5 h-3.5" /> 待体检
+                  </span>
+                )}
                 {summary.overallStatus === 'passed' && (
                   <span className="bg-emerald-50 text-emerald-700 text-xs px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1 font-bold">
                     <ShieldCheck className="w-3.5 h-3.5" /> 准予上线
@@ -180,7 +194,7 @@ export const AuditReportInspector: React.FC<AuditReportInspectorProps> = ({
           </div>
         </div>
 
-        {summary.adminFeedback && (
+        {showAdminFeedback && summary.adminFeedback && (
           <div className="mt-3.5 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div>
@@ -227,14 +241,20 @@ export const AuditReportInspector: React.FC<AuditReportInspectorProps> = ({
             <span>LLM 语义安全引擎 ({llmList.length})</span>
           </button>
         </div>
-
-        <span className="text-[11px] text-slate-500 font-medium hidden sm:inline">
-          点击任意审核项展开查获细节与源码高亮
-        </span>
       </div>
 
       {/* Rules list */}
       <div className="space-y-3">
+        {summary.score == null && (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-8 flex flex-col items-center justify-center gap-2 text-center">
+            <ShieldCheck className="w-6 h-6 text-slate-400" />
+            <span className="text-sm font-bold text-slate-700">该技能尚未体检</span>
+            <span className="text-xs text-slate-500 max-w-md leading-relaxed">
+              只有管理员在审核工作台运行双引擎安全体检并点击「保存扫描结果」后，
+              这里才会展示正则特征与 LLM 语义研判的完整检测明细。
+            </span>
+          </div>
+        )}
         {displayList.map(({ item, engine }) => {
           const isExpanded = selectedRuleId === item.ruleId;
           const isFailedOrWarning = item.status === 'fail' || item.status === 'warning';

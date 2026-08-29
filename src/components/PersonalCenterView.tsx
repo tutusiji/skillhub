@@ -28,7 +28,8 @@ import {
   Settings,
   MessageSquare,
   Shield,
-  RefreshCw
+  RefreshCw,
+  GitBranch
 } from 'lucide-react';
 import { SkillItem, UserAccount, SkillDemand } from '../types';
 import { SkillCard } from './SkillCard';
@@ -37,6 +38,8 @@ import { isOwnSubmission } from '../utils/skillOwnership';
 import { useExpertDomains } from '../hooks/useExpertDomains';
 import { PopconfirmBubble } from './PopconfirmBubble';
 import { Avatar } from './Avatar';
+import { SkillPreviewModal } from './SkillPreviewModal';
+import { SkillVersionManagerModal } from './SkillVersionManagerModal';
 
 interface PersonalCenterViewProps {
   currentUser: UserAccount | null;
@@ -56,10 +59,69 @@ interface PersonalCenterViewProps {
   onShuffleAvatar?: () => Promise<void> | void;
   onOpenLogin: () => void;
   onCopyInstallCmd: (cmd: string) => void;
+  /** 技能作者编辑元数据（白名单字段） */
+  onEditSkillMeta?: (skill: SkillItem) => void;
+  /** 技能作者发布新版本（带 parentSkillId 打开 UploadSkillModal） */
+  onPublishNewVersion?: (skill: SkillItem) => void;
+  /** 作者删除自己的驳回版本（版本记录弹窗）；返回 Promise 供弹窗成功后刷新版本链 */
+  onDeleteVersion?: (id: string) => Promise<void>;
   onToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, message: string) => void;
 }
 
 type PersonalTab = 'starred' | 'submissions' | 'demands' | 'liked';
+
+/**
+ * 把「我的提交」按版本链根节点分组 → 插件卡片（一个插件一行）。
+ * 列表接口不含 archived 版本（完整版本链由版本记录弹窗实时拉取），
+ * 这里只负责把可见的待审/驳回/上架版本归并到同一插件下。
+ */
+function groupSubmissionsByPlugin(skills: SkillItem[]): SkillItem[][] {
+  const byId = new Map(skills.map((s) => [s.id, s]));
+  const rootOf = new Map<string, string>();
+  const resolveRoot = (s: SkillItem): string => {
+    const memo = rootOf.get(s.id);
+    if (memo) return memo;
+    let cur = s;
+    const visited = new Set<string>();
+    while (cur.parentSkillId) {
+      if (visited.has(cur.id)) break;
+      visited.add(cur.id);
+      const parent = byId.get(cur.parentSkillId);
+      if (!parent) break;
+      cur = parent;
+    }
+    rootOf.set(s.id, cur.id);
+    return cur.id;
+  };
+  const groups = new Map<string, SkillItem[]>();
+  for (const s of skills) {
+    const rootId = resolveRoot(s);
+    const list = groups.get(rootId) ?? [];
+    list.push(s);
+    groups.set(rootId, list);
+  }
+  return [...groups.values()];
+}
+
+/**
+ * 插件卡片代表行：优先「当前对外版本」(approved)，其次待审/下架/驳回的最新一条。
+ * 卡片展示插件当前状态；完整版本记录由版本记录弹窗实时拉取。
+ */
+function pickPluginRepresentative(versions: SkillItem[]): SkillItem {
+  const weight = (s: SkillItem) =>
+    s.status === 'approved'
+      ? 3
+      : s.status === 'pending'
+        ? 2
+        : s.status === 'offline'
+          ? 1
+          : 0;
+  return [...versions].sort(
+    (a, b) =>
+      weight(b) - weight(a) ||
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  )[0];
+}
 
 export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
   currentUser,
@@ -78,12 +140,20 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
   onOpenLogin,
   onCopyInstallCmd,
   onShuffleAvatar,
+  onEditSkillMeta,
+  onPublishNewVersion,
+  onDeleteVersion,
   onToast
 }) => {
-  const [activeTab, setActiveTab] = useState<PersonalTab>('demands');
+  // 默认 tab = 排在第一位的那个（手动调整 tab 按钮顺序时记得同步这里）
+  const [activeTab, setActiveTab] = useState<PersonalTab>('submissions');
   const [searchQuery, setSearchQuery] = useState('');
   // 头像切换中：用于禁用按钮 + 转圈，避免连点产生多次请求（每次都会写库）
   const [avatarSwitching, setAvatarSwitching] = useState(false);
+  // 未发布技能（pending/rejected）的只读预览弹窗；已发布技能仍走详情页
+  const [previewSkill, setPreviewSkill] = useState<SkillItem | null>(null);
+  // 版本记录管理弹窗：当前查看的插件（代表行）
+  const [managePlugin, setManagePlugin] = useState<SkillItem | null>(null);
   // 专家组数据走 hook（与首页/管理端/征集广场保持同一份），徽章名称才跟随后端修改
   const { domains: expertDomains } = useExpertDomains();
 
@@ -155,18 +225,31 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
     s.slug.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const filteredSubmissions = mySubmissions.filter(s =>
-    s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    s.slug.toLowerCase().includes(searchQuery.toLowerCase())
+  // 我的技能插件：先展示插件卡片（按版本链根分组，一组一行），
+  // 点击卡片再进入版本记录弹窗查看该插件的全部历史版本。
+  // versionCountOf 记录每组可见版本数（archived 版本由版本记录弹窗实时拉全量）。
+  const pluginGroups = groupSubmissionsByPlugin(mySubmissions);
+  const versionCountOf = new Map(
+    pluginGroups.map(g => [pickPluginRepresentative(g).id, g.length]),
   );
+  const pluginCards = pluginGroups
+    .map(pickPluginRepresentative)
+    .filter(s =>
+      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      s.slug.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
   const filteredDemands = myDemands.filter(d =>
     d.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     d.description.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const approvedCount = mySubmissions.filter(s => s.status === 'approved').length;
-  const pendingCount = mySubmissions.filter(s => s.status === 'pending').length;
+  // 「查看技能详情与文件树」：统一走只读预览弹窗，不离开个人中心；
+  // 已发布/下架/归档技能在弹窗底部提供「打开完整详情页」入口，
+  // 收藏/点赞/下载/安装等完整功能仍在详情页进行
+  const handleViewDetail = (skill: SkillItem) => {
+    setPreviewSkill(skill);
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200 pb-12 text-left">
@@ -284,113 +367,44 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
           </div>
         </div>
 
-        {/* Counters Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-slate-100">
-          <div 
-            onClick={() => setActiveTab('demands')}
-            className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
-              activeTab === 'demands' ? 'bg-amber-50/70 border-amber-300 ring-2 ring-amber-400/20' : 'bg-slate-50/70 border-slate-200/80 hover:bg-slate-100/60'
-            }`}
-          >
-            <div className="flex items-center justify-between text-xs text-slate-500">
-              <span className="font-semibold">我发布的技能征集</span>
-              <Coins className="w-4 h-4 text-amber-500" />
-            </div>
-            <div className="text-2xl font-black text-slate-900 mt-1">
-              {myDemands.length}
-            </div>
-            <div className="text-[11px] text-amber-700 font-semibold mt-0.5">
-              {myDemands.filter(d => d.status === 'open' || d.status === 'approved').length} 征集中 · {myDemands.filter(d => d.status === 'pending').length} 待审
-            </div>
-          </div>
-
-          <div 
-            onClick={() => setActiveTab('submissions')}
-            className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
-              activeTab === 'submissions' ? 'bg-indigo-50/70 border-indigo-300 ring-2 ring-indigo-400/20' : 'bg-slate-50/70 border-slate-200/80 hover:bg-slate-100/60'
-            }`}
-          >
-            <div className="flex items-center justify-between text-xs text-slate-500">
-              <span className="font-semibold">我上传的技能插件</span>
-              <Upload className="w-4 h-4 text-indigo-600" />
-            </div>
-            <div className="text-2xl font-black text-slate-900 mt-1">
-              {mySubmissions.length}
-            </div>
-            <div className="text-[11px] text-indigo-600 font-semibold mt-0.5">
-              {approvedCount} 已上线 · {pendingCount} 审核中
-            </div>
-          </div>
-
-          <div 
-            onClick={() => setActiveTab('starred')}
-            className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
-              activeTab === 'starred' ? 'bg-amber-50/70 border-amber-300 ring-2 ring-amber-400/20' : 'bg-slate-50/70 border-slate-200/80 hover:bg-slate-100/60'
-            }`}
-          >
-            <div className="flex items-center justify-between text-xs text-slate-500">
-              <span className="font-semibold">我的收藏</span>
-              <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
-            </div>
-            <div className="text-2xl font-black text-slate-900 mt-1">
-              {starredSkills.length}
-            </div>
-            <div className="text-[11px] text-slate-400 mt-0.5">常用技能快捷调用</div>
-          </div>
-
-          <div 
-            onClick={() => setActiveTab('liked')}
-            className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
-              activeTab === 'liked' ? 'bg-rose-50/70 border-rose-300 ring-2 ring-rose-400/20' : 'bg-slate-50/70 border-slate-200/80 hover:bg-slate-100/60'
-            }`}
-          >
-            <div className="flex items-center justify-between text-xs text-slate-500">
-              <span className="font-semibold">我点赞的技能</span>
-              <Heart className="w-4 h-4 text-rose-500 fill-rose-500" />
-            </div>
-            <div className="text-2xl font-black text-slate-900 mt-1">
-              {likedSkills.length}
-            </div>
-            <div className="text-[11px] text-slate-400 mt-0.5">全站优秀实践</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs Menu & Search Filter Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
+        {/* Tabs Menu & Search Filter Bar — 整合进个人面板，去掉外边框 */}
+        <div className="relative z-10 -mx-6 sm:-mx-8 mt-6 px-6 sm:px-8 pt-5 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         <div className="flex items-center gap-1.5 overflow-x-auto">
-          <button
-            onClick={() => setActiveTab('demands')}
-            id="tab-personal-demands"
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeTab === 'demands'
-                ? 'bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-            }`}
-          >
-            <Coins className="w-3.5 h-3.5 text-amber-500" />
-            <span>我发布的技能征集 ({myDemands.length})</span>
-          </button>
-
+          
           <button
             onClick={() => setActiveTab('submissions')}
             id="tab-personal-submissions"
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap border border-transparent focus-visible:ring-2 focus-visible:ring-indigo-300 ${
               activeTab === 'submissions'
-                ? 'bg-indigo-50 text-indigo-900 border border-indigo-200 shadow-2xs'
+                ? 'bg-indigo-50 text-indigo-900 border-indigo-200 shadow-2xs'
                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
             <Upload className="w-3.5 h-3.5 text-indigo-600" />
-            <span>我上传的技能插件 ({mySubmissions.length})</span>
+            <span>我的技能插件 ({mySubmissions.length})</span>
           </button>
+          
+          <button
+            onClick={() => setActiveTab('demands')}
+            id="tab-personal-demands"
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap border border-transparent focus-visible:ring-2 focus-visible:ring-amber-300 ${
+              activeTab === 'demands'
+                ? 'bg-amber-50 text-amber-900 border-amber-300 shadow-2xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <Coins className="w-3.5 h-3.5 text-amber-500" />
+            <span>我的技能征集 ({myDemands.length})</span>
+          </button>
+
+          
 
           <button
             onClick={() => setActiveTab('starred')}
             id="tab-personal-starred"
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap border border-transparent focus-visible:ring-2 focus-visible:ring-amber-300 ${
               activeTab === 'starred'
-                ? 'bg-amber-50 text-amber-900 border border-amber-200 shadow-2xs'
+                ? 'bg-amber-50 text-amber-900 border-amber-200 shadow-2xs'
                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
@@ -401,9 +415,9 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
           <button
             onClick={() => setActiveTab('liked')}
             id="tab-personal-liked"
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap border border-transparent focus-visible:ring-2 focus-visible:ring-rose-300 ${
               activeTab === 'liked'
-                ? 'bg-rose-50 text-rose-900 border border-rose-200 shadow-2xs'
+                ? 'bg-rose-50 text-rose-900 border-rose-200 shadow-2xs'
                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
@@ -423,7 +437,8 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
             className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
           />
         </div>
-      </div>
+        </div>
+        </div>
 
       {/* TAB: MY DEMANDS */}
       {activeTab === 'demands' && (
@@ -594,10 +609,10 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
         </div>
       )}
 
-      {/* TAB: MY SUBMISSIONS & AUDIT PROGRESS TRACKER */}
+      {/* TAB: MY SUBMISSIONS — 插件卡片列表（一个插件一行，点进卡片看版本记录） */}
       {activeTab === 'submissions' && (
         <div className="space-y-4">
-          {filteredSubmissions.length === 0 ? (
+          {pluginCards.length === 0 ? (
             <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 text-slate-400 space-y-3">
               <Upload className="w-12 h-12 text-slate-200 mx-auto" />
               <div className="text-base font-bold text-slate-700">暂无上传记录</div>
@@ -612,153 +627,115 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
               </button>
             </div>
           ) : (
-            <div className="space-y-4">
-              {filteredSubmissions.map(skill => {
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {pluginCards.map(skill => {
                 const isApproved = skill.status === 'approved';
                 const isPending = skill.status === 'pending';
                 const isRejected = skill.status === 'rejected';
+                const versionCount = versionCountOf.get(skill.id) ?? 1;
+                const badge = isApproved
+                  ? { text: '已上架', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
+                  : isPending
+                    ? { text: '审核中', cls: 'bg-amber-50 text-amber-800 border-amber-200' }
+                    : isRejected
+                      ? { text: '已驳回', cls: 'bg-rose-50 text-rose-700 border-rose-200' }
+                      : { text: '已下架', cls: 'bg-slate-100 text-slate-700 border-slate-300' };
 
                 return (
                   <div
                     key={skill.id}
-                    className="p-6 rounded-3xl bg-white border border-slate-200 shadow-sm space-y-5 hover:border-indigo-200 transition-colors"
+                    className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm space-y-4 hover:border-indigo-200 transition-colors flex flex-col"
                   >
-                    {/* Header Info */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2.5 flex-wrap">
-                          <span className="text-xs font-bold px-2.5 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 uppercase">
-                            {skill.category}
-                          </span>
-                          <h3 
-                            onClick={() => onSelectSkill(skill)}
-                            className="text-base font-bold text-slate-900 hover:text-indigo-600 cursor-pointer transition-colors"
-                          >
-                            {skill.name}
-                          </h3>
-                          <span className="font-mono text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                            {skill.version}
-                          </span>
-                        </div>
-                        <div className="font-mono text-xs text-indigo-600">
-                          {skill.slug}
-                        </div>
-                      </div>
-
-                      {/* Status Tag */}
-                      <div className="flex items-center gap-2">
-                        {isApproved && (
-                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                            <span>已通过终审并上线</span>
-                          </span>
-                        )}
-                        {isPending && (
-                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1.5">
-                            <Clock className="w-4 h-4 text-amber-600 animate-spin" />
-                            <span>管理员审核中</span>
-                          </span>
-                        )}
-                        {isRejected && (
-                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-1.5">
-                            <XCircle className="w-4 h-4 text-rose-600" />
-                            <span>已驳回 (需整改)</span>
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Progress Pipeline Tracker */}
-                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
-                      <div className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                        <span>审核流转进度跟踪 (Audit Lifecycle Tracker)</span>
-                        <span className="text-[11px] text-slate-500 font-mono">
-                          双引擎安全得分: <b className="text-slate-900">{skill.auditResults.score} 分</b>
+                    {/* 插件身份：分类 + 状态徽章 + 名称 + 规范 slug + 版本数 */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold px-2.5 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 uppercase">
+                          {skill.category}
+                        </span>
+                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border flex items-center gap-1 ${badge.cls}`}>
+                          {isApproved && <CheckCircle2 className="w-3 h-3 text-emerald-600" />}
+                          {isPending && <Clock className="w-3 h-3 text-amber-600" />}
+                          {isRejected && <XCircle className="w-3 h-3 text-rose-600" />}
+                          {badge.text}
                         </span>
                       </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-2">
-                        {/* Step 1: 提交完成 */}
-                        <div className="p-2.5 rounded-xl bg-white border border-emerald-200 flex items-center gap-2 text-xs">
-                          <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-bold flex items-center justify-center text-[10px]">
-                            ✓
-                          </div>
-                          <div>
-                            <div className="font-bold text-slate-800">1. 代码包已提交</div>
-                            <div className="text-[10px] text-slate-400">打包树完成校验</div>
-                          </div>
-                        </div>
-
-                        {/* Step 2: 正则引擎 */}
-                        <div className="p-2.5 rounded-xl bg-white border border-emerald-200 flex items-center gap-2 text-xs">
-                          <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-bold flex items-center justify-center text-[10px]">
-                            ✓
-                          </div>
-                          <div>
-                            <div className="font-bold text-slate-800">2. 正则规则筛查</div>
-                            <div className="text-[10px] text-slate-400">
-                              {skill.auditResults.regexResults.filter(r => r.status === 'fail').length === 0 ? '0 违规项' : '有告警'}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Step 3: LLM 语义 */}
-                        <div className="p-2.5 rounded-xl bg-white border border-emerald-200 flex items-center gap-2 text-xs">
-                          <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-bold flex items-center justify-center text-[10px]">
-                            ✓
-                          </div>
-                          <div>
-                            <div className="font-bold text-slate-800">3. LLM 深度审计</div>
-                            <div className="text-[10px] text-slate-400">大模型语义完成判定</div>
-                          </div>
-                        </div>
-
-                        {/* Step 4: 超级管理员终审 */}
-                        <div className={`p-2.5 rounded-xl border flex items-center gap-2 text-xs ${
-                          isApproved 
-                            ? 'bg-white border-emerald-200' 
-                            : isRejected 
-                            ? 'bg-rose-50 border-rose-300' 
-                            : 'bg-amber-50/70 border-amber-200'
-                        }`}>
-                          <div className={`w-5 h-5 rounded-full font-bold flex items-center justify-center text-[10px] ${
-                            isApproved ? 'bg-emerald-100 text-emerald-700' : isRejected ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-800'
-                          }`}>
-                            {isApproved ? '✓' : isRejected ? '✕' : '4'}
-                          </div>
-                          <div>
-                            <div className="font-bold text-slate-800">4. 管理员终审</div>
-                            <div className="text-[10px] text-slate-500">
-                              {isApproved ? '已审批上线' : isRejected ? '审核驳回' : '等待人工确认'}
-                            </div>
-                          </div>
-                        </div>
+                      <h3
+                        onClick={() => setManagePlugin(skill)}
+                        className="text-base font-bold text-slate-900 hover:text-indigo-600 cursor-pointer transition-colors"
+                        title="点击查看该插件的全部版本记录"
+                      >
+                        {skill.name}
+                      </h3>
+                      <div className="font-mono text-xs text-indigo-600 flex items-center gap-2 flex-wrap">
+                        <span>{skill.slug}</span>
+                        <span className="text-slate-400">·</span>
+                        <span>v{skill.version}</span>
+                        <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px]">
+                          {versionCount} 个版本
+                        </span>
                       </div>
                     </div>
 
-                    {/* Action Bar */}
-                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2 text-xs">
-                      <div className="text-slate-500 font-medium">
-                        提交时间：{new Date(skill.createdAt).toLocaleString('zh-CN')}
+                    {/* 驳回意见：管理员驳回时必须填写理由，展示给作者整改 */}
+                    {isRejected && skill.auditResults?.adminFeedback && (
+                      <div className="p-2.5 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
+                        <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                        <div>
+                          <strong>管理员驳回意见：</strong>
+                          <span>{skill.auditResults.adminFeedback}</span>
+                        </div>
                       </div>
+                    )}
 
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => onSelectSkill(skill)}
-                          className="px-3.5 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold flex items-center gap-1.5 transition-colors"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>查看技能详情与文件树</span>
-                        </button>
+                    {/* 摘要：双引擎得分 + 提交时间 */}
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                      <span className="flex items-center gap-1.5">
+                        <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
+                        双引擎得分：
+                        <b className="text-slate-900">
+                          {skill.auditResults?.score != null ? `${skill.auditResults.score} 分` : '未体检'}
+                        </b>
+                      </span>
+                      <span className="font-mono">
+                        提交于 {new Date(skill.createdAt).toLocaleDateString('zh-CN')}
+                      </span>
+                    </div>
 
+                    {/* 操作栏 */}
+                    <div className="flex flex-wrap items-center gap-2 pt-1 text-xs mt-auto">
+                      <button
+                        onClick={() => setManagePlugin(skill)}
+                        className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold flex items-center gap-1.5 transition-colors"
+                      >
+                        <GitBranch className="w-3.5 h-3.5" />
+                        <span>查看版本记录</span>
+                        <ChevronRight className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => handleViewDetail(skill)}
+                        className="px-3.5 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold flex items-center gap-1.5 transition-colors"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>查看详情预览</span>
+                      </button>
+                      <button
+                        onClick={() => onDownloadZip(skill)}
+                        className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold flex items-center gap-1.5 transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>下载 ZIP</span>
+                      </button>
+                      {onPublishNewVersion && skill.status !== 'archived' && (
                         <button
-                          onClick={() => onDownloadZip(skill)}
-                          className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold flex items-center gap-1.5 transition-colors"
+                          onClick={() => onPublishNewVersion(skill)}
+                          disabled={isPending}
+                          className="px-3.5 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50/60 hover:bg-indigo-50 text-indigo-700 font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          title={isPending ? '已有待审核的新版本，请等待审核' : '上传新版本 ZIP，进入审核队列'}
                         >
-                          <Download className="w-3.5 h-3.5" />
-                          <span>下载源码 ZIP</span>
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>发布新版本</span>
                         </button>
-                      </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -795,6 +772,33 @@ export const PersonalCenterView: React.FC<PersonalCenterViewProps> = ({
             </div>
           )}
         </div>
+      )}
+
+      {/* 未发布技能预览弹窗 */}
+      {previewSkill && (
+        <SkillPreviewModal
+          skill={previewSkill}
+          onClose={() => setPreviewSkill(null)}
+          onOpenDetail={() => {
+            const s = previewSkill;
+            setPreviewSkill(null);
+            onSelectSkill(s);
+          }}
+        />
+      )}
+
+      {/* 插件版本记录弹窗：个人中心「我的技能插件」的二层入口 */}
+      {managePlugin && (
+        <SkillVersionManagerModal
+          plugin={managePlugin}
+          onClose={() => setManagePlugin(null)}
+          onPreview={(v) => setPreviewSkill(v)}
+          onDownloadZip={onDownloadZip}
+          onEditMeta={onEditSkillMeta}
+          onPublishNewVersion={onPublishNewVersion}
+          onDeleteVersion={onDeleteVersion}
+          onToast={onToast}
+        />
       )}
     </div>
   );

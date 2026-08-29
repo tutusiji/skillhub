@@ -11,7 +11,11 @@ export class LlmConfigEntity {
   @PrimaryColumn({ length: 32 })
   id: string;
 
-  /** OpenAI 兼容协议的网关基址，如 https://api.deepseek.com/v1 */
+  /** 网关协议：'openai' 兼容 /chat/completions，或 'anthropic' Messages API */
+  @Column({ length: 20, default: 'openai' })
+  protocol: string;
+
+  /** 网关基址：OpenAI 协议为 https://api.deepseek.com/v1，Anthropic 为 https://api.deepseek.com/anthropic */
   @Column({ name: 'base_url', length: 300, default: '' })
   baseUrl: string;
 

@@ -83,6 +83,27 @@ const RUN = Date.now().toString(36);
 const ctx = {};
 
 /**
+ * 审核工作台链路：运行双引擎体检（sandbox-scan，只扫描不落库）→ 保存扫描结果
+ * （POST :id/audit-report，落库并回写 auditScore）。
+ * 未保存前技能无得分、不可审批上架（后端 approveSkill 强制校验）。
+ * @param {string} skillId 技能 ID
+ * @param {string} [payload] 待扫描内容；缺省用无害只读文档
+ */
+async function scanAndSaveSkill(skillId, payload = '# 回归测试技能\n\n本技能仅做只读分析，不写文件、不发起外网请求。\n') {
+  const scan = await req('POST', '/api/v1/audit/sandbox-scan', {
+    token: ctx.adminToken,
+    body: { payload, skillId },
+  });
+  check('工作台运行双引擎体检成功', [200, 201].includes(scan.status) && typeof scan.body?.score === 'number', `status=${scan.status} score=${scan.body?.score}`);
+  const saved = await req('POST', `/api/v1/skills/${skillId}/audit-report`, {
+    token: ctx.adminToken,
+    body: { result: scan.body },
+  });
+  check('保存扫描结果成功 (auditScore 回写)', [200, 201].includes(saved.status) && saved.body?.auditScore != null, `status=${saved.status} auditScore=${saved.body?.auditScore}`);
+  return saved;
+}
+
+/**
  * 分组一：认证与用户体系
  */
 async function testAuth() {
@@ -232,6 +253,7 @@ async function testSkills() {
   check('readme 字段完整落库', upload.body?.readme?.includes('回归测试技能'), `readme=${upload.body?.readme}`);
   check('expertDomain 字段完整落库', upload.body?.expertDomain === '质量保障', `expertDomain=${upload.body?.expertDomain}`);
   check('installCommands 使用裸插件名', String(upload.body?.installCommands?.claude || '').includes('@skillhub') && !String(upload.body?.installCommands?.claude || '').includes('/plugin install @'), `cmd=${upload.body?.installCommands?.claude}`);
+  check('上传不再自动扫描 (auditScore 为空)', upload.body?.auditScore == null, `auditScore=${upload.body?.auditScore}`);
 
   const upload2 = await req('POST', '/api/v1/skills/upload', {
     token: ctx.devToken,
@@ -287,6 +309,22 @@ async function testSkills() {
   if (forged.body?.id) {
     await req('DELETE', `/api/v1/skills/${forged.body.id}`, { token: ctx.adminToken });
   }
+
+  // —— 新审核流程：未体检不可上架；工作台运行体检 → 保存扫描结果 → 才能批准 ——
+  const approveNoScan = await req('POST', `/api/v1/skills/${ctx.skillId}/approve`, {
+    token: ctx.adminToken,
+    body: { reviewer: 'admin', comment: '未体检直接上架应被拒绝' },
+  });
+  check('未体检技能不可审批上架 (400)', approveNoScan.status === 400, `status=${approveNoScan.status} body=${JSON.stringify(approveNoScan.body).slice(0, 120)}`);
+
+  // 保存前详情页审计报告应无得分（不虚构）
+  const reportBefore = await req('GET', `/api/v1/skills/${ctx.skillId}/audit-report`, { token: ctx.devToken });
+  check('未体检技能审计报告无得分 (pending)', reportBefore.status === 200 && (reportBefore.body?.score == null || reportBefore.body?.overallStatus === 'pending'), `status=${reportBefore.status} score=${reportBefore.body?.score} overall=${reportBefore.body?.overallStatus}`);
+
+  await scanAndSaveSkill(ctx.skillId, upload.body?.readme || undefined);
+
+  const savedReport = await req('GET', `/api/v1/skills/${ctx.skillId}/audit-report`, { token: ctx.devToken });
+  check('保存后可拉取体检报告明细', savedReport.status === 200 && savedReport.body?.score != null, `status=${savedReport.status} score=${savedReport.body?.score}`);
 
   const approve = await req('POST', `/api/v1/skills/${ctx.skillId}/approve`, {
     token: ctx.adminToken,
@@ -624,6 +662,15 @@ async function testLlmEngine() {
         ...(original.body?.hasApiKey ? {} : { apiKey: null }),
       },
     });
+    // 本组测试用 mock key 覆盖过 llm_configs.api_key，而 llm-config API 只回传掩码，
+    // 无法自动还原原始凭据 —— 若线上已配置真实网关 Key，这里只能提示管理员手动恢复，
+    // 否则下一次真实审核 / 连通性测试会以 401 降级（真实 LLM 引擎失效）。
+    if (original.body?.hasApiKey) {
+      console.warn(
+        '\n⚠️  本组测试用 mock key 覆盖了 llm_configs.api_key（API 仅返回掩码，无法自动还原）。\n' +
+          '    若此前已配置真实网关 Key，请在风控中心「大模型网关」重新填入，否则真实 LLM 引擎将 401 降级。\n',
+      );
+    }
   };
 
   // 未配置凭据时不允许开启真实调用
@@ -1312,6 +1359,9 @@ async function testZipRoundTrip() {
   check('原始 ZIP 下载大小与上传一致', dlBuf.length === zipBuf.length, `size=${dlBuf.length} vs ${zipBuf.length}`);
   check('原始 ZIP 下载内容与上传一致 (含二进制)', dlBuf.toString('base64') === origB64, 'base64 mismatch');
 
+  // 审核工作台链路：先运行体检并保存扫描结果，才可批准上架（新审核流程门槛）
+  await scanAndSaveSkill(skillId, '# 回归 ZIP 技能\n\n仅只读分析，无危险调用。');
+
   // 审核通过后 Git 市场写入真实文件（含二进制 png 无损还原）
   await req('POST', `/api/v1/skills/${skillId}/approve`, {
     token: ctx.adminToken,
@@ -1345,6 +1395,276 @@ async function testZipRoundTrip() {
 }
 
 /**
+ * 分组 18：多版本发布 + 元数据自由编辑
+ *
+ * 覆盖链路：
+ *   - 作者自更新元数据（name / 裸改 version / 越权改别人 → 403）
+ *   - 发新版（coexist 独立计数 / replace 继承计数 / 防堆积拒绝）
+ *   - 审核联动（coexist 保留旧版 / replace 归档旧版）
+ *   - versions 接口的 owner/admin 可见性收敛
+ *   - 管理员回滚（链上合法目标 / 链外非法目标）
+ */
+async function testSkillVersions() {
+  group('18. 多版本发布与元数据自由编辑');
+
+  const created = []; // 本组创建的技能 ID，末尾统一清理
+  const del = (id) => req('DELETE', `/api/v1/skills/${id}`, { token: ctx.adminToken });
+
+  // ── 0. 准备：上传并审核通过 v1，记录初始 counter ──
+  const v1 = await req('POST', '/api/v1/skills/upload', {
+    token: ctx.devToken,
+    body: {
+      name: `多版本测试技能-${RUN}`,
+      category: 'coding',
+      description: '多版本发布链路回归验证（v1）。',
+      version: 'v1.0.0',
+      readme: '# 多版本测试\n\nv1 版本。',
+      tags: ['回归测试'],
+    },
+  });
+  check('上传 v1 成功', [200, 201].includes(v1.status), `status=${v1.status}`);
+  const v1Id = v1.body?.id;
+  created.push(v1Id);
+
+  await scanAndSaveSkill(v1Id, v1.body?.readme || undefined);
+  const approveV1 = await req('POST', `/api/v1/skills/${v1Id}/approve`, {
+    token: ctx.adminToken,
+    body: { reviewer: 'admin' },
+  });
+  check('v1 审核通过', [200, 201].includes(approveV1.status) && approveV1.body?.status === 'approved', `status=${approveV1.status}`);
+
+  // ── 1. 作者自更新元数据（Phase 2）──
+  const meta = await req('PUT', `/api/v1/skills/${v1Id}`, {
+    token: ctx.devToken,
+    body: { name: `多版本测试技能-${RUN}-改名` },
+  });
+  check('作者自更新 name 成功', meta.status === 200 && meta.body?.name?.includes('改名'), `status=${meta.status} name=${meta.body?.name}`);
+
+  const bareVersion = await req('PUT', `/api/v1/skills/${v1Id}`, {
+    token: ctx.devToken,
+    body: { version: 'v9.9.9' },
+  });
+  check('已上架技能裸改 version 被拒 (400)', bareVersion.status === 400, `status=${bareVersion.status}`);
+
+  // 越权：注册第二个用户，上传其技能，再让 v1 作者去改 → 403
+  const otherEmp = `${7000000 + (Date.now() % 900000)}`.slice(0, 7);
+  const otherReg = await req('POST', '/api/v1/auth/register', {
+    body: { name: `他人用户-${RUN}`, employeeId: otherEmp, password: 'Password123!', department: '外部部门' },
+  });
+  check('第二个用户注册成功', Boolean(otherReg.body?.token), `status=${otherReg.status}`);
+  const otherToken = otherReg.body?.token;
+  const otherSkill = await req('POST', '/api/v1/skills/upload', {
+    token: otherToken,
+    body: { name: `他人技能-${RUN}`, category: 'coding', description: '属于其他用户的技能，验证越权防护。' },
+  });
+  created.push(otherSkill.body?.id);
+  const forbiddenEdit = await req('PUT', `/api/v1/skills/${otherSkill.body?.id}`, {
+    token: ctx.devToken,
+    body: { name: '越权改名' },
+  });
+  check('编辑他人技能被拒 (403)', forbiddenEdit.status === 403, `status=${forbiddenEdit.status}`);
+
+  // ── 2. 发新版 coexist（独立计数）──
+  const v2 = await req('POST', '/api/v1/skills/upload', {
+    token: ctx.devToken,
+    body: {
+      name: `多版本测试技能-${RUN}-v2`,
+      category: 'coding',
+      description: '多版本发布链路回归验证（v2 共存）。',
+      version: 'v2.0.0',
+      readme: '# 多版本测试\n\nv2 版本。',
+      parentSkillId: v1Id,
+      supersedeMode: 'coexist',
+    },
+  });
+  check('上传 v2 (coexist) 成功', [200, 201].includes(v2.status), `status=${v2.status}`);
+  const v2Id = v2.body?.id;
+  created.push(v2Id);
+  check('v2 指向父版本', v2.body?.parentSkillId === v1Id, `parent=${v2.body?.parentSkillId}`);
+  check('v2 发布模式为 coexist', v2.body?.supersedeMode === 'coexist', `mode=${v2.body?.supersedeMode}`);
+  check('v2 新版本独立计 counter (likes=0)', Number(v2.body?.likes) === 0, `likes=${v2.body?.likes}`);
+
+  // 防堆积：v2 还在 pending 时再发 v3 → 400
+  const v3Dup = await req('POST', '/api/v1/skills/upload', {
+    token: ctx.devToken,
+    body: {
+      name: `多版本测试技能-${RUN}-v3`,
+      category: 'coding',
+      description: '应被防堆积拒绝的新版本。',
+      version: 'v3.0.0',
+      parentSkillId: v1Id,
+      supersedeMode: 'replace',
+    },
+  });
+  check('父版本已有 pending 子版时再发新版被拒 (400)', v3Dup.status === 400, `status=${v3Dup.status}`);
+
+  // 审核通过 v2（coexist）→ 父版本 v1 保持 approved
+  await scanAndSaveSkill(v2Id, v2.body?.readme || undefined);
+  const approveV2 = await req('POST', `/api/v1/skills/${v2Id}/approve`, {
+    token: ctx.adminToken,
+    body: { reviewer: 'admin' },
+  });
+  check('v2 审核通过', [200, 201].includes(approveV2.status) && approveV2.body?.status === 'approved', `status=${approveV2.status}`);
+  const v1AfterCoexist = await req('GET', `/api/v1/skills/${v1Id}`, { token: ctx.devToken });
+  check('coexist 模式旧版保持 approved', v1AfterCoexist.body?.status === 'approved', `status=${v1AfterCoexist.body?.status}`);
+
+  // ── 3. 发新版 replace（继承计数）──
+  // 给 v2 加一次赞，验证 replace 模式下 v3 继承 v2 的 counter
+  await req('PATCH', `/api/v1/skills/${v2Id}/metrics`, {
+    token: ctx.devToken,
+    body: { metric: 'likes' },
+  });
+  const v2Detail = await req('GET', `/api/v1/skills/${v2Id}`, { token: ctx.devToken });
+  const v2Likes = Number(v2Detail.body?.likes) || 0;
+
+  const v3 = await req('POST', '/api/v1/skills/upload', {
+    token: ctx.devToken,
+    body: {
+      name: `多版本测试技能-${RUN}-v3`,
+      category: 'coding',
+      description: '多版本发布链路回归验证（v3 替代）。',
+      version: 'v3.0.0',
+      readme: '# 多版本测试\n\nv3 版本。',
+      parentSkillId: v2Id,
+      supersedeMode: 'replace',
+    },
+  });
+  check('上传 v3 (replace) 成功', [200, 201].includes(v3.status), `status=${v3.status}`);
+  const v3Id = v3.body?.id;
+  created.push(v3Id);
+  check('v3 发布模式为 replace', v3.body?.supersedeMode === 'replace', `mode=${v3.body?.supersedeMode}`);
+  check('v3 继承父版本 counter', Number(v3.body?.likes) === v2Likes, `v3.likes=${v3.body?.likes} v2.likes=${v2Likes}`);
+
+  // 审核通过 v3（replace）→ v2 被归档
+  await scanAndSaveSkill(v3Id, v3.body?.readme || undefined);
+  const approveV3 = await req('POST', `/api/v1/skills/${v3Id}/approve`, {
+    token: ctx.adminToken,
+    body: { reviewer: 'admin' },
+  });
+  check('v3 审核通过', [200, 201].includes(approveV3.status) && approveV3.body?.status === 'approved', `status=${approveV3.status}`);
+  const v2AfterReplace = await req('GET', `/api/v1/skills/${v2Id}`, { token: ctx.devToken });
+  check('replace 模式旧版被归档', v2AfterReplace.body?.status === 'archived', `status=${v2AfterReplace.body?.status}`);
+  check('归档版本记录替代者 ID', v2AfterReplace.body?.supersededById === v3Id, `supersededById=${v2AfterReplace.body?.supersededById}`);
+
+  // ── 4. versions 接口可见性收敛 ──
+  const anonVersions = await req('GET', `/api/v1/skills/${v3Id}/versions`);
+  const anonIds = (anonVersions.body || []).map((s) => s.id);
+  check('匿名 versions 不含 archived 版本', anonVersions.status === 200 && !anonIds.includes(v2Id), `ids=${anonIds.join(',')}`);
+
+  const ownerVersions = await req('GET', `/api/v1/skills/${v3Id}/versions`, { token: ctx.devToken });
+  const ownerIds = (ownerVersions.body || []).map((s) => s.id);
+  check('owner versions 包含 archived 版本', ownerVersions.status === 200 && ownerIds.includes(v2Id), `ids=${ownerIds.join(',')}`);
+  check('owner versions 覆盖完整版本链 (v1+v2+v3)', ownerIds.length >= 3 && ownerIds.includes(v1Id), `ids=${ownerIds.join(',')}`);
+
+  // ── 5. 管理员回滚 ──
+  const rollback = await req('POST', `/api/v1/skills/${v3Id}/rollback`, {
+    token: ctx.adminToken,
+    body: { targetVersionId: v2Id },
+  });
+  check('回滚到链上历史版本成功', [200, 201].includes(rollback.status), `status=${rollback.status} ${JSON.stringify(rollback.body).slice(0, 150)}`);
+  const v2Rolled = await req('GET', `/api/v1/skills/${v2Id}`, { token: ctx.devToken });
+  check('回滚后目标版本恢复 approved', v2Rolled.body?.status === 'approved', `status=${v2Rolled.body?.status}`);
+  const v3Rolled = await req('GET', `/api/v1/skills/${v3Id}`, { token: ctx.devToken });
+  check('回滚后原当前版本被归档', v3Rolled.body?.status === 'archived', `status=${v3Rolled.body?.status}`);
+
+  const badRollback = await req('POST', `/api/v1/skills/${v2Id}/rollback`, {
+    token: ctx.adminToken,
+    body: { targetVersionId: otherSkill.body?.id },
+  });
+  check('回滚到链外版本被拒 (400)', badRollback.status === 400, `status=${badRollback.status}`);
+
+  // ── 5.5 版本身份：slug 继承 + 当前版本解析 + 作者删除驳回版本 ──
+  // ① 版本更新共享根 slug（升级后仍同名，如 dev-expert 升级后仍是 dev-expert，不得 -2）
+  check('v2 继承根 slug（升级后仍同名）', v2.body?.slug === v1.body?.slug, `v2.slug=${v2.body?.slug} v1.slug=${v1.body?.slug}`);
+  check('v3 继承根 slug（升级后仍同名）', v3.body?.slug === v1.body?.slug, `v3.slug=${v3.body?.slug} v1.slug=${v1.body?.slug}`);
+
+  // ② findBySlug 解析「当前对外版本」= 最新 approved（coexist 双 approved 取最新，不 -2）。
+  //    slug 含 @skillhub/ 作用域，需像前端 api.getSkill 一样 encodeURIComponent 后入路径
+  const bySlugCurrent = await req('GET', `/api/v1/skills/${encodeURIComponent(v1.body?.slug)}`, { token: ctx.devToken });
+  check('findBySlug 解析到当前 approved 版本', bySlugCurrent.status === 200 && bySlugCurrent.body?.id === v2Id, `id=${bySlugCurrent.body?.id} expected=${v2Id}`);
+
+  // ③ 列表不做后端去重：coexist 双 approved 都返回（审核队列依赖前端按 status 过滤；
+  //    对外收敛一个版本由展示层 MarketplaceView 完成，不在列表接口吞数据）
+  const listAll = await req('GET', '/api/v1/skills', { token: ctx.adminToken });
+  const sameSlugApproved = (listAll.body || []).filter((s) => s.slug === v1.body?.slug && s.status === 'approved');
+  check('列表保留同插件多条 approved（供前端收敛）', listAll.status === 200 && sameSlugApproved.length >= 2, `count=${sameSlugApproved.length}`);
+
+  // ④ 作者删除自己的驳回版本（权限裁决：管理员删任意状态 / 作者仅删自己 rejected）
+  const vRej = await req('POST', '/api/v1/skills/upload', {
+    token: ctx.devToken,
+    body: {
+      name: `多版本测试技能-${RUN}-被驳回`,
+      category: 'coding',
+      description: '用于验证作者可删除自己驳回版本。',
+      version: 'v0.1.0',
+      readme: '# 多版本测试\n\n被驳回版本。',
+      parentSkillId: v1Id,
+      supersedeMode: 'coexist',
+    },
+  });
+  check('上传驳回候选版本成功', [200, 201].includes(vRej.status), `status=${vRej.status}`);
+  const vRejId = vRej.body?.id;
+  created.push(vRejId);
+  const rejectVRej = await req('POST', `/api/v1/skills/${vRejId}/reject`, {
+    token: ctx.adminToken,
+    body: { feedback: '回归测试：故意驳回以便验证作者删除' },
+  });
+  check('驳回候选版本成功', [200, 201].includes(rejectVRej.status) && rejectVRej.body?.status === 'rejected', `status=${rejectVRej.status}`);
+
+  const otherDeleteRejected = await req('DELETE', `/api/v1/skills/${vRejId}`, { token: otherToken });
+  check('他人删除作者驳回版本被拒 (403)', otherDeleteRejected.status === 403, `status=${otherDeleteRejected.status}`);
+
+  const authorDeleteApproved = await req('DELETE', `/api/v1/skills/${v2Id}`, { token: ctx.devToken });
+  check('作者删除自己上架版本被拒 (403)', authorDeleteApproved.status === 403, `status=${authorDeleteApproved.status}`);
+
+  const authorDeleteRejected = await req('DELETE', `/api/v1/skills/${vRejId}`, { token: ctx.devToken });
+  check('作者删除自己驳回版本成功', authorDeleteRejected.status === 200, `status=${authorDeleteRejected.status}`);
+
+  // ⑤ 删除驳回版本后版本链仍完整：被删节点下的子版本重挂到根
+  const vRej2 = await req('POST', '/api/v1/skills/upload', {
+    token: ctx.devToken,
+    body: {
+      name: `多版本测试技能-${RUN}-被驳回2`,
+      category: 'coding',
+      description: '链上存在子版本的驳回版本，验证重挂。',
+      version: 'v0.2.0',
+      readme: '# 多版本测试\n\n被驳回版本（带子版）。',
+      parentSkillId: v1Id,
+      supersedeMode: 'coexist',
+    },
+  });
+  const vRej2Id = vRej2.body?.id;
+  created.push(vRej2Id);
+  await req('POST', `/api/v1/skills/${vRej2Id}/reject`, {
+    token: ctx.adminToken,
+    body: { feedback: '回归测试：验证子版本重挂' },
+  });
+  const vChild = await req('POST', '/api/v1/skills/upload', {
+    token: ctx.devToken,
+    body: {
+      name: `多版本测试技能-${RUN}-子版`,
+      category: 'coding',
+      description: '挂在被驳回版本之下的子版本。',
+      version: 'v0.2.1',
+      readme: '# 多版本测试\n\n子版本。',
+      parentSkillId: vRej2Id,
+      supersedeMode: 'coexist',
+    },
+  });
+  const vChildId = vChild.body?.id;
+  created.push(vChildId);
+  const delRej2 = await req('DELETE', `/api/v1/skills/${vRej2Id}`, { token: ctx.devToken });
+  check('删除带子版本的驳回版本成功', delRej2.status === 200, `status=${delRej2.status}`);
+  const vChildAfter = await req('GET', `/api/v1/skills/${vChildId}`, { token: ctx.devToken });
+  check('删除后子版本重挂到根版本', vChildAfter.body?.parentSkillId === v1Id, `parent=${vChildAfter.body?.parentSkillId} expected=${v1Id}`);
+
+  // ── 6. 清理本组创建的全部技能（同步移除 Git 市场索引）──
+  for (const id of created.filter(Boolean)) {
+    await del(id);
+  }
+}
+
+/**
  * 主入口：串行执行全部分组并汇总结果
  */
 async function main() {
@@ -1371,6 +1691,7 @@ async function main() {
   await testSkillExpertDomains();
   await testExpertDomainCrud();
   await testZipRoundTrip();
+  await testSkillVersions();
   await testAvatarShuffle();
   // 节流会锁定被测账号，放在最后执行避免影响前序分组
   await testLoginThrottle();

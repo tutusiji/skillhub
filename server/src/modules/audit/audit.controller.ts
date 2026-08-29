@@ -110,12 +110,20 @@ export class AuditController {
   }
 
   /**
-   * 触发即时双引擎沙箱体检扫描 (上传技能时游客也可能触发，允许匿名)
+   * 触发即时双引擎沙箱体检扫描（只扫描不落库，允许匿名）。
+   *
+   * 结果只用于审核工作台预览：管理员确认后需调用
+   * `POST /api/v1/skills/:id/audit-report` 显式「保存扫描结果」，
+   * 未保存前 audit_reports 中不会出现该技能的报告，其他地方也就拉取不到。
    * @param body 待体检 Payload (代码或 Prompt)
    */
   @Post('sandbox-scan')
   async runSandboxScan(@Body() body: { payload: string; skillId?: string }) {
-    return this.auditService.runDualEngineScan(body.payload || '', body.skillId);
+    return this.auditService.runDualEngineScan(
+      body.payload || '',
+      body.skillId,
+      /* persist= */ false,
+    );
   }
 
   /**

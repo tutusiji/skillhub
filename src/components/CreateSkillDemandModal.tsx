@@ -15,6 +15,7 @@ import {
 import { ExpertDomain, SkillDemand, UserAccount } from '../types';
 import { useExpertDomains } from '../hooks/useExpertDomains';
 import { Modal } from './Modal';
+import { Select } from './Select';
 
 interface CreateSkillDemandModalProps {
   isOpen: boolean;
@@ -301,18 +302,16 @@ export const CreateSkillDemandModal: React.FC<CreateSkillDemandModalProps> = ({
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
                 时间周期
               </label>
-              <div className="relative">
-                <select
-                  value={deadlineText}
-                  onChange={e => setDeadlineText(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs text-slate-800 bg-white"
-                >
-                  <option value="永久有效">永久有效 (默认)</option>
-                  <option value="7天有效">7天内有效</option>
-                  <option value="30天有效">30天内有效</option>
-                  <option value="90天有效">90天内有效</option>
-                </select>
-              </div>
+              <Select
+                size="md"
+                value={deadlineText}
+                onChange={e => setDeadlineText(e.target.value)}
+              >
+                <option value="永久有效">永久有效 (默认)</option>
+                <option value="7天有效">7天内有效</option>
+                <option value="30天有效">30天内有效</option>
+                <option value="90天有效">90天内有效</option>
+              </Select>
               <span className="text-[11px] text-slate-400 mt-1.5 block">
                 到期若未解决可随时延期或撤销返还积分
               </span>

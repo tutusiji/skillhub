@@ -22,8 +22,15 @@ export class SkillEntity {
   @Column({ length: 150 })
   name: string;
 
-  /** 技能唯一 Slug 标识 (例如 @skillhub/sql-diagnose-agent) */
-  @Column({ unique: true, length: 100 })
+  /**
+   * 插件 Slug 标识 (例如 @skillhub/sql-diagnose-agent)
+   *
+   * 注意：同一插件的所有版本共享根版本的 slug（版本链 parent_skill_id 同链）
+   * —— 插件身份 = 版本链，对外一个插件只有一个名字。因此该列不再唯一，
+   * 仅保留普通索引保证按 slug 查询（findBySlug / resolveUniqueSlug）不退化。
+   */
+  @Index()
+  @Column({ length: 100 })
   slug: string;
 
   /** 业务分类 ('coding' | 'database' | 'devops' | 'mcp' | 'research') */
@@ -126,9 +133,9 @@ export class SkillEntity {
   @Column({ name: 'zip_file_name', length: 255, nullable: true })
   zipFileName: string | null;
 
-  /** 双引擎风控综合评分 (0~100) */
-  @Column({ default: 100 })
-  auditScore: number;
+  /** 双引擎风控综合评分 (0~100)；未在审核工作台运行体检并保存结果为 null（未体检） */
+  @Column({ nullable: true })
+  auditScore: number | null;
 
   /** 审核操作人姓名 (管理员通过/驳回时写入) */
   @Column({ name: 'reviewed_by', type: 'text', nullable: true })

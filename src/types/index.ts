@@ -89,7 +89,8 @@ export interface AuditRule {
   name: string;
   type: RuleType;
   severity: RuleSeverity;
-  category: 'security' | 'privacy' | 'compliance' | 'stability' | 'performance';
+  /** 风控分类标识（内置 security/privacy/compliance/stability/performance，允许自定义扩展，与后端 audit_rules.category 自由字符串保持一致） */
+  category: string;
   description: string;
   pattern?: string; // For Regex rules
   llmPromptTemplate?: string; // For LLM rules
@@ -121,7 +122,8 @@ export interface AuditItemResult {
 
 export interface AuditExecutionSummary {
   overallStatus: AuditStatus;
-  score: number; // 0-100
+  /** 0-100；未体检（尚未保存扫描结果）为 null，此时 overallStatus 为 'pending' */
+  score: number | null;
   scannedAt: string;
   regexResults: AuditItemResult[];
   llmResults: AuditItemResult[];
@@ -175,7 +177,15 @@ export interface SkillItem {
   isStarred?: boolean;
   createdAt: string;
   updatedAt: string;
-  status: 'approved' | 'pending' | 'rejected' | 'scanning' | 'offline';
+  status: 'approved' | 'pending' | 'rejected' | 'scanning' | 'offline' | 'archived';
+  /** 版本链：当前版本指向其前驱版本（第一版为 null）。同一插件的所有版本共享根版本的 slug。 */
+  parentSkillId?: string | null;
+  /** 版本链：已归档版本指向替代它的 approved 版本 */
+  supersededById?: string | null;
+  /** 版本链：被新版替代的时间戳（archived 状态时填入） */
+  archivedAt?: string | null;
+  /** 版本链：'replace' = 审核通过时自动归档旧版；'coexist' = 旧版保留 approved 独立计数 */
+  supersedeMode?: 'replace' | 'coexist' | null;
   permissions: string[];
   readme: string;
   fileTree: FileTreeNode[];
@@ -244,6 +254,8 @@ export interface FeedbackItem {
 }
 
 export interface DeepSeekConfig {
+  /** 网关协议：'openai' 兼容 /chat/completions，或 'anthropic' Messages API */
+  protocol?: 'openai' | 'anthropic';
   baseUrl: string;
   apiKey: string;
   modelName: string;

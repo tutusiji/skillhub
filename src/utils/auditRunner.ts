@@ -1,5 +1,5 @@
-import { AuditExecutionSummary, AuditItemResult, AuditRule, DeepSeekConfig, FileTreeNode, SkillItem } from '../types';
-import { api, type ApiLlmVerdict } from '../services/api';
+import { AuditExecutionSummary, AuditItemResult, AuditRule, DeepSeekConfig, FileTreeNode, RuleSeverity, SkillItem } from '../types';
+import { api, type ApiLlmVerdict, type ApiSandboxScanResult } from '../services/api';
 
 interface FlattenedFile {
   path: string;
@@ -27,6 +27,95 @@ export function flattenFileTree(nodes: FileTreeNode[], currentPath: string = '')
     }
   }
   return result;
+}
+
+/**
+ * 由技能源码/README/权限声明拼接与后端扫描同构的 payload（审核工作台「运行体检」用）。
+ * 拼接格式与后端 audit.service 的扫描入参保持一致（`--- FILE: <path> ---` 等），
+ * 保证工作台预览结果与详情页最终展示口径统一。
+ */
+export function buildScanPayloadFromSkill(
+  skill: Partial<Pick<SkillItem, 'fileTree' | 'readme' | 'permissions'>>,
+): string {
+  const files = flattenFileTree(skill.fileTree || []);
+  const allCode = files
+    .map((f) => `--- FILE: ${f.path} ---\n${f.content}`)
+    .join('\n\n');
+  const readmeText = skill.readme || '';
+  return `${allCode}\n\n--- README ---\n${readmeText}\n\n--- PERMISSIONS ---\n${(skill.permissions || []).join(', ')}`;
+}
+
+/**
+ * 把后端沙箱扫描结果（与后端 AuditReportResult 同构）映射为前端可渲染的审计摘要。
+ * 与后端 audit.service.getSkillAuditReport 的映射口径保持一致：
+ * regexHits → 每条命中一项正则审计项；llmVerdict → 单条 LLM 语义审计项。
+ * 审核工作台「运行体检 + 保存扫描结果」链路以此驱动。
+ */
+export function mapServerScanToSummary(
+  result: ApiSandboxScanResult,
+  meta?: { reviewedBy?: string; reviewedAt?: string },
+): AuditExecutionSummary {
+  const regexResults: AuditItemResult[] = (result.regexHits || []).map((hit) => {
+    const isBlocked = hit.severity === 'critical' || hit.severity === 'high';
+    const sev = (hit.severity as RuleSeverity) || 'medium';
+    return {
+      ruleId: hit.ruleId || 'regex-hit',
+      ruleName: hit.ruleName || '未命名正则规则',
+      type: 'regex',
+      status: isBlocked ? 'fail' : 'warning',
+      severity: sev,
+      matchedSummary:
+        hit.lineHint ||
+        (isBlocked ? '在源码中检出高危违规特征' : '在源码中检出潜在警告特征'),
+      details: {
+        detectedSnippet: hit.matchSnippet || undefined,
+        riskExplanation: isBlocked
+          ? `正则规则 [${hit.ruleName}] 命中危险模式，可能导致权限被攻破、凭据泄露或被远程执行指令。`
+          : `规则 [${hit.ruleName}] 发现需人工确认的模式。`,
+        remediationSuggestion: isBlocked
+          ? '请移除该危险关键字/模式，改用内网环境变量注入或安全标准 SDK。'
+          : '建议核实是否为调试代码，并在发布前优化。',
+      },
+    };
+  });
+
+  const llmResults: AuditItemResult[] = [];
+  const v = result.llmVerdict;
+  if (v) {
+    const engineLabel = v.model || 'LLM 引擎';
+    const failStatus =
+      v.status === 'failed' ? 'fail' : v.status === 'warning' ? 'warning' : 'pass';
+    const reasoningText =
+      v.reasoning && v.reasoning.length ? v.reasoning.join(' / ') : v.summary || '暂无推导详情';
+    llmResults.push({
+      ruleId: 'llm-verdict',
+      ruleName: 'LLM 语义安全研判',
+      type: 'llm',
+      status: failStatus,
+      severity: v.status === 'failed' ? 'high' : v.status === 'warning' ? 'medium' : 'low',
+      matchedSummary: `[${engineLabel}] ${v.summary || '语义核验通过，未发现异常倾向'}`,
+      details: {
+        riskExplanation: v.summary || '大模型已完成 Prompt 上下文与代码流分析。',
+        aiReasoning: v.degradedReason
+          ? `${reasoningText}（降级原因：${v.degradedReason}）`
+          : `${engineLabel} 研判置信度 ${Math.round((v.confidence ?? 0) * 100)}%，耗时 ${v.latencyMs ?? 0}ms：${reasoningText}`,
+        remediationSuggestion:
+          v.suggestions && v.suggestions.length
+            ? v.suggestions.join('；')
+            : '保持当前安全规范。',
+      },
+    });
+  }
+
+  return {
+    overallStatus: result.status,
+    score: result.score,
+    scannedAt: meta?.reviewedAt ?? new Date().toISOString(),
+    regexResults,
+    llmResults,
+    reviewedBy: meta?.reviewedBy,
+    reviewedAt: meta?.reviewedAt,
+  };
 }
 
 /**

@@ -89,7 +89,16 @@ SkillHub 后端使用 **TypeORM** 做对象关系映射，数据库统一使用 
 | `reviewed_by` | text | NULL | 审核人 |
 | `reviewed_at` | text | NULL | 审核时间 |
 | `admin_feedback` | text | NULL | 审核意见/驳回理由 |
+| `parent_skill_id` | text | NULL | 多版本：前驱版本 ID（第一版为 NULL；索引 `idx_skills_parent`） |
+| `superseded_by_id` | text | NULL | 多版本：当前 archived 版本被哪个 approved 版本替代（反向指针） |
+| `archived_at` | text | NULL | 多版本：被新版替代的时间戳（区分 `rejected` 死信与 `archived` 历史版） |
+| `supersede_mode` | varchar(20) | NULL | 多版本：`replace`（替代旧版，审核通过自动归档父版并继承 counters）/ `coexist`（共存，独立计数） |
 | `created_at` / `updated_at` | timestamp | NOT NULL | 时间戳 |
+
+> **多版本发布版本链**：新版本通过 `parent_skill_id` 指向旧版本，审核通过时若为 `replace` 模式，
+> 父版本 `status` 置 `archived` 且 `superseded_by_id` 指向新版；`coexist` 模式父版本保持 `approved`。
+> counters 在「替代」模式下于**上传时**从父版本复制起点（累计不清零），`coexist` 模式独立计数。
+> 归档版本对非 owner/管理员不可见（`GET /api/v1/skills/:id/versions` 与列表/详情均收敛）。
 
 > ⚠️ 部分列**未声明 `name:`，实际列名即驼峰**：`installCommands`、`fileTree`、`auditScore`、
 > `permissions` 等。写原生 SQL / 迁移脚本时按上表列名，不要按属性名转 snake_case。

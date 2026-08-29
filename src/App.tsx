@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { 
+import { Loader2 } from 'lucide-react';
+import {
   AuditExecutionSummary, 
   AuditRule, 
   DeepSeekConfig,
@@ -16,6 +17,7 @@ import { SkillDemandMarketView } from './components/SkillDemandMarketView';
 import { SkillDetailPage } from './components/SkillDetailPage';
 import { PersonalCenterView } from './components/PersonalCenterView';
 import { UploadSkillModal } from './components/UploadSkillModal';
+import { EditSkillMetaModal } from './components/EditSkillMetaModal';
 import { AuditManagementView } from './components/AuditManagementView';
 import { RuleManagementView } from './components/RuleManagementView';
 import { AdminSettingsView } from './components/AdminSettingsView';
@@ -28,7 +30,6 @@ import { BackToTop } from './components/BackToTop';
 import { ToastContainer } from './components/Toast';
 import { downloadSkillAsZip } from './utils/zipHelper';
 import { isOwnSubmission } from './utils/skillOwnership';
-import { executeDualEngineAudit } from './utils/auditRunner';
 import { api, mapApiDemand, mapApiFeedback, mapApiSkill, mapApiUser, mapAuditRule, syncToBackend } from './services/api';
 import { FeedbackAdminView } from './components/FeedbackAdminView';
 import { CategoryAndDomainView } from './components/CategoryAndDomainView';
@@ -105,6 +106,14 @@ export default function App() {
 
   // 当前登录用户（null = 未登录/访客）。启动时若有有效令牌，由 /auth/me 回源最新身份
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
+
+  // 会话是否已回源完毕。刷新时若存在令牌，需先异步调 /auth/me 恢复登录态，
+  // 在此之前 currentUser 恒为 null —— 若直接渲染依赖登录态的页面（个人中心 /
+  // 审核 / 风控 / 权限设置 / 建议 / 专家组管理），会先闪一下「请先登录」/「需要管理员权限」
+  // 再跳到真实内容。无令牌时立即就绪（确定未登录，无需等待，登录提示可直接显示）。
+  const [authResolved, setAuthResolved] = useState<boolean>(
+    () => !localStorage.getItem('skillhub_token'),
+  );
 
   // Backend integration status (null = checking, false = offline demo fallback)
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
@@ -242,12 +251,16 @@ export default function App() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showCreateDemandModal, setShowCreateDemandModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  // 多版本发布：父版本上下文（个人中心「发布新版本」按钮触发）
+  const [newVersionContext, setNewVersionContext] = useState<{
+    parentSkillId: string;
+    parentSkillName: string;
+  } | null>(null);
+  // 元数据编辑弹窗上下文
+  const [editingSkill, setEditingSkill] = useState<SkillItem | null>(null);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginActionHint, setLoginActionHint] = useState<string | undefined>(undefined);
-
-  // Scanning indicator
-  const [isScanningDetail, setIsScanningDetail] = useState(false);
 
   // 详情页直达加载态：刷新访问 /skill/:slug 时技能不在本地，需从后端异步拉取
   const [detailLoading, setDetailLoading] = useState(false);
@@ -342,7 +355,8 @@ export default function App() {
   // 首屏启动 + 每次进入数据驱动页面时拉取主数据。
   // 关键点：管理员审核通过一个技能后回到集市，必须重新请求才能看到它，
   // 否则页面用的还是进入时的旧快照（这正是「审核通过后首页看不到新技能」的原因）。
-  // 组织用户名单 (allUsers) 要求登录态，不在此处拉取，由下方登录后的 effect 负责。
+  // 组织用户名单 (allUsers) 仅管理员可读、只被超管的权限设置页消费，不在此处拉取：
+  // 由登录/回源 effect 按角色拉取 + 打开设置页时刷新（普通用户全程不发起）。
   useEffect(() => {
     const isDataTab =
       currentTab === 'market' || currentTab === 'personal' || currentTab === 'audit';
@@ -362,9 +376,12 @@ export default function App() {
 
     let cancelled = false;
     (async () => {
+      // /auth/me 返回的最新角色：组织名单是否可拉取决于它，而非可能过期的 currentUser
+      let profileRole: UserRole | null = null;
       try {
         const profile = await api.profile();
         if (!cancelled) {
+          profileRole = (profile.role as UserRole) ?? null;
           setCurrentUser(prev => ({
             ...mapApiUser(profile),
             avatar: profile.avatar || prev?.avatar || '',
@@ -375,19 +392,29 @@ export default function App() {
         }
       } catch {
         // 令牌失效（过期/被撤销）：清理掉，回到访客态，避免后续请求持续 401
-        localStorage.removeItem('skillhub_token');
-        localStorage.removeItem('skillhub_user');
+        if (!cancelled) {
+          localStorage.removeItem('skillhub_token');
+          localStorage.removeItem('skillhub_user');
+        }
         return;
+      } finally {
+        // 无论令牌有效与否，回源一旦结束即标记会话已就绪：
+        // 之后的渲染不再展示「恢复登录态」占位，而是真实的登录/未登录内容
+        if (!cancelled) setAuthResolved(true);
       }
 
-      // 登录态下同步拉取组织用户名单（账号切换器与权限设置页依赖）
-      try {
-        const users = await api.listUsers();
-        if (!cancelled) {
-          setAllUsers(users.map(mapApiUser));
+      // 组织成员名单（/auth/users）仅管理员可访问，且只有超管的权限设置页消费它。
+      // 普通用户不发起：后端会 403「仅管理员有权查看组织成员名单」——
+      // 授权判定在后端，但前端按角色决策「发不发」，明知必拒的请求不该发。
+      if (profileRole === 'admin' || profileRole === 'super_admin') {
+        try {
+          const users = await api.listUsers();
+          if (!cancelled) {
+            setAllUsers(users.map(mapApiUser));
+          }
+        } catch {
+          // 名单拉取失败不影响主流程
         }
-      } catch {
-        // 名单拉取失败不影响主流程
       }
 
       // 登录态下同步拉取建议列表（建议管理页数据源）
@@ -407,6 +434,27 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 打开权限设置页时按需刷新组织名单：
+  // 名单接口仅管理员可读，且只被超管的设置页消费 —— 普通用户全程不发起。
+  // 设置页启动前所有列表初始为空，进入页面时统一回源保证名单新鲜（角色/积分可能被改过）。
+  useEffect(() => {
+    if (currentTab !== 'settings') return;
+    const role = currentUser?.role;
+    if (role !== 'admin' && role !== 'super_admin') return;
+    let cancelled = false;
+    api
+      .listUsers()
+      .then(users => {
+        if (!cancelled) setAllUsers(users.map(mapApiUser));
+      })
+      .catch(() => {
+        /* 名单拉取失败不阻塞设置页 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentTab, currentUser?.role]);
+
   // Auth Guard Helper
   const requireAuth = (actionName: string): boolean => {
     if (!currentUser) {
@@ -424,13 +472,16 @@ export default function App() {
     setShowLoginModal(false);
     addToast('success', '登录成功', `欢迎回来，${user.name}！已为您开启全部操作权限`);
 
-    // 登录成功后再拉取组织用户名单（/auth/users 要求登录态）
-    api
-      .listUsers()
-      .then(users => setAllUsers(users.map(mapApiUser)))
-      .catch(() => {
-        /* 名单拉取失败不阻塞登录 */
-      });
+    // 组织成员名单仅管理员可访问（且只有超管的权限设置页消费它），
+    // 普通用户登录后不拉取，避免必然 403 的请求；权限设置页打开时再按需刷新
+    if (user.role === 'admin' || user.role === 'super_admin') {
+      api
+        .listUsers()
+        .then(users => setAllUsers(users.map(mapApiUser)))
+        .catch(() => {
+          /* 名单拉取失败不阻塞登录 */
+        });
+    }
 
     // 登录后拉取建议列表（管理员看全部、普通用户看自己的）
     api
@@ -458,29 +509,34 @@ export default function App() {
     }
 
     // 业务数据全部以数据库为准，文件源码内容无需本地持久化；
-    // 列表接口已剔除 fileTree（响应体 27.7MB → 37.5KB），
-    // 若本地没有源码，先从详情接口拉全量再打开，避免首屏代码树空白闪烁
+    // 列表接口已剔除 fileTree（响应体 27.7MB → 37.5KB）。
+    // 大插件源码请求较慢：这里「立即用已有数据打开详情页」，源码/审计明细由
+    // 详情页各自按需加载并显示分区遮罩，不再等全量回来才渲染整页。
     const hasContent = (skill.fileTree || []).some(n => !!n.content);
+    navigate('detail', skill);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     if (hasContent) {
-      navigate('detail', skill);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
+    // 后台拉全量（fileTree）回填：源码区到货后自动从遮罩切到文件树
     setDetailLoading(true);
-    try {
-      const detail = await api.getSkill(skill.slug);
-      const full = mapApiSkill(detail);
-      setSkills(prev => prev.map(s => (s.id === skill.id ? full : s)));
-      navigate('detail', full);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch (e) {
-      // 离线/后端不可用时退而求其次：用列表精简数据打开，至少元信息可看
-      navigate('detail', skill);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } finally {
-      setDetailLoading(false);
-    }
+    api
+      .getSkill(skill.slug)
+      .then(detail => {
+        const full = mapApiSkill(detail);
+        setSkills(prev => prev.map(s => (s.id === skill.id ? full : s)));
+        // 仅当仍停留在同一技能详情时才覆盖，避免快速切换技能时旧响应顶掉新选择
+        setSelectedSkill(prev =>
+          prev && prev.id === skill.id ? full : prev,
+        );
+      })
+      .catch(() => {
+        // 离线/后端不可用时保留精简数据，源码区显示空树与下载兜底
+      })
+      .finally(() => {
+        setDetailLoading(false);
+      });
   };
 
   // Skill Interaction Handlers (Guarded)
@@ -593,29 +649,8 @@ export default function App() {
     addToast('success', '指令已复制', `已复制 ${clientName || '安装'} 命令至剪贴板`);
   };
 
-  // Re-scan detail skill (Guarded)
-  const handleReScanDetailSkill = async (skill: SkillItem) => {
-    if (!requireAuth('重新体检')) {
-      return;
-    }
-    setIsScanningDetail(true);
-    try {
-      const summary = await executeDualEngineAudit(skill, rules, undefined, deepseekConfig);
-      setSkills(prev =>
-        prev.map(s => (s.id === skill.id ? { ...s, auditResults: summary } : s))
-      );
-      if (selectedSkill?.id === skill.id) {
-        setSelectedSkill({ ...selectedSkill, auditResults: summary });
-      }
-      addToast('success', '双引擎体检完成', `重新评估完成，最新得分: ${summary.score} 分`);
-    } catch (err) {
-      addToast('error', '体检失败', '执行扫描时发生异常');
-    } finally {
-      setIsScanningDetail(false);
-    }
-  };
-
-  // Upload new skill handler (Guarded) —— 提交后端入库并触发服务端双引擎风控复检
+  // Upload new skill handler (Guarded) —— 提交后端入库（不再于上传时立即扫描；
+  // 双引擎体检只在管理员审核工作台运行，保存扫描结果后才关联得分）
   const handleCreateSkill = async (newSkill: SkillItem) => {
     // 1. 乐观插入本地列表，用户立即可在个人中心看到提交记录
     setSkills(prev => [newSkill, ...prev]);
@@ -641,9 +676,12 @@ export default function App() {
         // 原始 ZIP（base64）与上传文件名：无损入库，供下载与 Git 发布
         zipBuffer: newSkill.zipBufferBase64,
         zipFileName: newSkill.zipFileName,
+        // 多版本发布上下文（仅在「发布新版本」入口触发时存在）
+        parentSkillId: (newSkill as any).parentSkillId,
+        supersedeMode: (newSkill as any).supersedeMode,
       });
 
-      // 3. 用后端返回的权威记录（含真实 ID 与服务端扫描分）替换本地临时记录
+      // 3. 用后端返回的权威记录（含真实 ID；新提交不含体检得分，扫描在审核工作台进行）替换本地临时记录
       const mapped = mapApiSkill(created);
       setSkills(prev => prev.map(s => (s.id === newSkill.id ? mapped : s)));
 
@@ -651,13 +689,13 @@ export default function App() {
         addToast(
           'success',
           '技能已直接上架',
-          `${mapped.name} 通过服务端风控复检 (${mapped.auditResults.score} 分)，已发布至 Git 市场`
+          `${mapped.name} 已发布至 Git 市场`
         );
       } else {
         addToast(
           'info',
           '已提交审核',
-          `${mapped.name} 服务端复检得分 ${mapped.auditResults.score} 分，等待管理员人工审核`
+          `${mapped.name} 已进入待审核队列，等待管理员运行双引擎安全体检后上架`
         );
       }
     } catch (error) {
@@ -668,6 +706,29 @@ export default function App() {
         `后端未接收该提交（${(error as Error).message}），恢复连接后请重新提交`
       );
     }
+  };
+
+  /**
+   * 技能作者自更新元数据（白名单：name / description / category / version）
+   * 以后端返回结果为准回写本地 skills 列表，避免数据漂移
+   * @param updated 更新后的 SkillItem（来自 EditSkillMetaModal.onSuccess）
+   */
+  const handleUpdateSkillMeta = (updated: SkillItem) => {
+    setSkills(prev => prev.map(s => (s.id === updated.id ? updated : s)));
+    // 同步详情页选中态（如果用户正在查看这个技能）
+    setSelectedSkill(prev => (prev && prev.id === updated.id ? updated : prev));
+  };
+
+  /**
+   * 「发布新版本」入口：把父版本上下文带进 UploadSkillModal
+   * @param parent 已存在的父版本 SkillItem
+   */
+  const openPublishNewVersion = (parent: SkillItem) => {
+    setNewVersionContext({
+      parentSkillId: parent.id,
+      parentSkillName: parent.name,
+    });
+    setShowUploadModal(true);
   };
 
   // ==========================================
@@ -688,12 +749,16 @@ export default function App() {
   /**
    * 从后端刷新当前用户与组织成员的积分余额
    * 需求相关操作会改动积分，操作后统一回源，保证余额显示与服务端一致
+   * 组织名单仅管理员需要：普通用户只刷自己的 profile，不发起必 403 的 /auth/users
    */
   const refreshPointsFromServer = async () => {
-    const [profileResult, usersResult] = await Promise.allSettled([
-      api.profile(),
-      api.listUsers(),
-    ]);
+    const needsRoster =
+      currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin');
+    const results = await Promise.allSettled(
+      needsRoster ? [api.profile(), api.listUsers()] : [api.profile()],
+    );
+    const profileResult = results[0];
+    const usersResult = needsRoster ? results[1] : undefined;
 
     if (profileResult.status === 'fulfilled') {
       const fresh = profileResult.value;
@@ -703,7 +768,7 @@ export default function App() {
           : prev
       );
     }
-    if (usersResult.status === 'fulfilled') {
+    if (usersResult && usersResult.status === 'fulfilled') {
       setAllUsers(usersResult.value.map(mapApiUser));
     }
   };
@@ -1122,15 +1187,36 @@ export default function App() {
     }
   };
 
+  /**
+   * 作者删除自己提交的被驳回版本（个人中心版本记录弹窗）。
+   * 与 handleDeleteSkill 不同：不做 isPrivilegedUser() 前置拦截，
+   * 是否允许删除完全交给后端裁决（作者仅可删自己提交的 rejected 版本）。
+   */
+  const handleDeleteSkillVersion = async (id: string) => {
+    const snapshot = skills;
+    const target = skills.find(s => s.id === id);
+
+    setSkills(prev => prev.filter(s => s.id !== id));
+    if (selectedSkill && selectedSkill.id === id) {
+      setSelectedSkill(null);
+      navigate('market');
+    }
+
+    try {
+      await api.deleteSkill(id);
+      addToast('success', '版本已删除', `${target?.name || id} v${target?.version ?? ''} 已彻底移除`);
+    } catch (error) {
+      setSkills(snapshot);
+      addToast('error', '删除失败', (error as Error).message);
+    }
+  };
+
   const handleUpdateSkillAudit = (id: string, summary: AuditExecutionSummary) => {
     setSkills(prev =>
       prev.map(s => (s.id === id ? { ...s, auditResults: summary } : s))
     );
-    // 体检得分回写后端，保证多端一致
-    void syncToBackend(
-      () => api.updateSkillAuditScore(id, summary.score),
-      '同步体检得分'
-    );
+    // 得分已由审核工作台「保存扫描结果」接口落库（POST :id/audit-report 回写 auditScore），
+    // 这里只同步本地展示状态，不再重复回写。
   };
 
   // Rule management handlers —— 规则变更需持久化到后端风控引擎
@@ -1235,6 +1321,19 @@ export default function App() {
   const canAccessManage =
     isSuperAdmin || (isAdminRole && menuPermissions.includes('manage'));
 
+  // 会话回源期间的占位：刷新后若存有令牌，/auth/me 尚未返回前 currentUser 为 null，
+  // 依赖登录态的页面直接渲染会闪「请先登录/需要管理员权限」。此占位替代这些状态，
+  // 等 authResolved 翻转后再渲染真实内容。
+  const authLoadingBlock = (
+    <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 space-y-4 max-w-lg mx-auto my-8">
+      <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold mx-auto">
+        <Loader2 className="w-6 h-6 animate-spin" />
+      </div>
+      <h2 className="text-lg font-bold text-slate-900">正在恢复登录状态…</h2>
+      <p className="text-xs text-slate-500">正在从服务器校验登录会话，请稍候。</p>
+    </div>
+  );
+
   return (
     <ExpertDomainsProvider>
       <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
@@ -1308,6 +1407,7 @@ export default function App() {
         mySubmissionsCount={mySubmissionsCount}
         isSuperAdmin={isSuperAdmin}
         backendOnline={backendOnline}
+        authLoading={!authResolved}
       />
 
       {/* Main Content Area */}
@@ -1368,9 +1468,15 @@ export default function App() {
               onToggleStar={handleToggleStar}
               onToggleLike={handleToggleLike}
               onDownloadZip={handleDownloadZip}
-              onReScanSkill={handleReScanDetailSkill}
-              isScanning={isScanningDetail}
+              // 重新体检只在管理员的审核工作台进行（运行体检→保存扫描结果），公开详情页不再触发扫描
+              onReScanSkill={undefined}
+              isScanning={false}
               onCopySuccess={(msg) => addToast('success', '已复制', msg)}
+              // 多版本发布：仅 owner/admin 显示版本选择器；切换版本复用详情拉取
+              currentUser={currentUser}
+              onSelectVersion={handleOpenSkillDetail}
+              // 大插件源码后台加载中：文件树区域显示遮罩，不阻塞整页
+              fileTreeLoading={detailLoading}
             />
           ) : (
             /* 详情页兜底：刷新直达 /skill/:slug 时技能从后端异步拉取，未找到时给出占位 */
@@ -1398,6 +1504,9 @@ export default function App() {
 
         {/* VIEW 4: PERSONAL CENTER (STARRED, MY SUBMISSIONS & MY DEMANDS) */}
         {currentTab === 'personal' && (
+          !authResolved ? (
+            authLoadingBlock
+          ) : (
           <PersonalCenterView
             currentUser={currentUser}
             allSkills={skills}
@@ -1417,25 +1526,37 @@ export default function App() {
                 setShowCreateDemandModal(true);
               }
             }}
+            onEditSkillMeta={(skill) => {
+              if (requireAuth('编辑元数据')) {
+                setEditingSkill(skill);
+              }
+            }}
+            onPublishNewVersion={(skill) => {
+              if (requireAuth('发布新版本')) {
+                openPublishNewVersion(skill);
+              }
+            }}
             onOpenLogin={() => {
               setLoginActionHint('查看个人中心数据');
               setShowLoginModal(true);
             }}
             onCopyInstallCmd={(cmd) => addToast('success', '安装命令已复制', cmd)}
             onDeleteDemand={handleDeleteDemand}
+            onDeleteVersion={handleDeleteSkillVersion}
             onShuffleAvatar={handleShuffleAvatar}
             onToast={addToast}
           />
+          )
         )}
 
         {/* VIEW 5: ADMIN AUDIT MANAGEMENT */}
         {currentTab === 'audit' && (
-          canAccessAudit ? (
+          !authResolved ? (
+            authLoadingBlock
+          ) : canAccessAudit ? (
             <AuditManagementView
               currentUser={currentUser!}
               skills={skills}
-              rules={rules}
-              deepseekConfig={deepseekConfig}
               onApproveSkill={handleApproveSkill}
               onRejectSkill={handleRejectSkill}
               onDelistSkill={handleDelistSkill}
@@ -1476,7 +1597,9 @@ export default function App() {
 
         {/* VIEW 6: RISK CONTROL CENTER (风控中心) */}
         {currentTab === 'rules' && (
-          canAccessRules ? (
+          !authResolved ? (
+            authLoadingBlock
+          ) : canAccessRules ? (
             <RuleManagementView
               currentUser={currentUser!}
               rules={rules}
@@ -1519,7 +1642,9 @@ export default function App() {
 
         {/* VIEW 7: SUPER ADMIN PERMISSIONS & USER ROLES SETTINGS */}
         {currentTab === 'settings' && (
-          isSuperAdmin ? (
+          !authResolved ? (
+            authLoadingBlock
+          ) : isSuperAdmin ? (
             <AdminSettingsView
               currentUser={currentUser}
               users={allUsers}
@@ -1559,7 +1684,9 @@ export default function App() {
 
         {/* VIEW 8: SUGGESTION CENTER (建议反馈，全员可用：管理员管理，普通用户看自己的+提交) */}
         {currentTab === 'feedback' && (
-          currentUser ? (
+          !authResolved ? (
+            authLoadingBlock
+          ) : currentUser ? (
             <FeedbackAdminView
               currentUser={currentUser}
               feedbackList={feedbackList}
@@ -1594,7 +1721,9 @@ export default function App() {
 
         {/* VIEW 9: 分类和专家组管理（按菜单权限授权） */}
         {currentTab === 'manage' && (
-          canAccessManage && currentUser ? (
+          !authResolved ? (
+            authLoadingBlock
+          ) : canAccessManage && currentUser ? (
             <CategoryAndDomainView
               currentUser={currentUser}
               skills={skills}
@@ -1688,12 +1817,30 @@ export default function App() {
         />
       )}
 
-      {/* 2. Upload Skill Modal */}
+      {/* 2. Upload Skill Modal（含多版本发布：personal 走 newVersionContext 路径） */}
       {showUploadModal && currentUser && (
         <UploadSkillModal
           currentUser={currentUser}
-          onClose={() => setShowUploadModal(false)}
-          onSubmit={handleCreateSkill}
+          onClose={() => {
+            setShowUploadModal(false);
+            setNewVersionContext(null);
+          }}
+          onSubmit={(s) => {
+            handleCreateSkill(s);
+            setNewVersionContext(null);
+          }}
+          onToast={addToast}
+          parentSkillId={newVersionContext?.parentSkillId}
+          parentSkillName={newVersionContext?.parentSkillName}
+        />
+      )}
+
+      {/* 2b. 编辑技能元数据弹窗 */}
+      {editingSkill && currentUser && (
+        <EditSkillMetaModal
+          skill={editingSkill}
+          onClose={() => setEditingSkill(null)}
+          onSuccess={handleUpdateSkillMeta}
           onToast={addToast}
         />
       )}

@@ -99,7 +99,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
 
               <div className="flex items-center gap-2 shrink-0">
                 <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-mono font-semibold">
-                  {skill.auditResults.score}分
+                  {skill.auditResults.score != null ? `${skill.auditResults.score}分` : '未体检'}
                 </span>
                 <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 transition-colors" />
               </div>

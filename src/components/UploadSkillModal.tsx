@@ -3,11 +3,13 @@ import {
   Upload,
   FileArchive,
   CheckCircle2,
+  Folder,
   FolderTree,
   File,
   FileText,
   FileCode,
   Image as ImageIcon,
+  GitBranch,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import {
@@ -19,12 +21,27 @@ import {
 } from '../types';
 import { api } from '../services/api';
 import { Modal } from './Modal';
+import { Select } from './Select';
 
 interface UploadSkillModalProps {
   currentUser: UserAccount;
   onClose: () => void;
   onSubmit: (newSkill: SkillItem) => void;
   onToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, message: string) => void;
+  /**
+   * 多版本发布：父版本 ID（不传表示全新技能）
+   * 传了则弹窗标题改为「发布新版本」并显示 supersedeMode 选择器
+   */
+  parentSkillId?: string;
+  /**
+   * 多版本发布：父版本显示名（仅用于弹窗标题展示）
+   */
+  parentSkillName?: string;
+  /**
+   * 多版本发布：默认 supersedeMode
+   * 默认 'coexist'（新版独立计 counter，旧版保留 approved 不动）
+   */
+  defaultSupersedeMode?: 'coexist' | 'replace';
 }
 
 /** ZIP 内文件按扩展名归类图标 */
@@ -34,6 +51,59 @@ function fileIconFor(name: string) {
   if (lower.endsWith('.json') || lower.endsWith('.js') || lower.endsWith('.ts')) return <FileCode className="w-3.5 h-3.5" />;
   if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.svg')) return <ImageIcon className="w-3.5 h-3.5" />;
   return <File className="w-3.5 h-3.5" />;
+}
+
+/** 统计 ZIP 源码树中的文件总数（不含目录） */
+function countZipFiles(nodes: FileTreeNode[]): number {
+  let count = 0;
+  const walk = (ns: FileTreeNode[]) => {
+    for (const n of ns) {
+      if (n.type === 'directory') walk(n.children || []);
+      else count++;
+    }
+  };
+  walk(nodes);
+  return count;
+}
+
+/**
+ * 递归渲染 ZIP 源码树（只展示目录/文件层级，不含文件内容）
+ * 按 DFS 顺序收集到 acc，超出 limit 即截断，避免超大压缩包拖垮渲染
+ * @param nodes 当前层节点
+ * @param depth 缩进深度
+ * @param acc 结果收集数组
+ * @param limit 最大渲染节点数
+ */
+function renderZipTree(nodes: FileTreeNode[], depth: number, acc: React.ReactNode[], limit: number) {
+  for (const node of nodes) {
+    if (acc.length >= limit) return;
+    acc.push(
+      <div
+        key={node.id || node.path}
+        className="flex items-center gap-1.5 text-slate-600"
+        style={{ paddingLeft: depth * 16 }}
+      >
+        {node.type === 'directory' ? (
+          <Folder className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+        ) : (
+          fileIconFor(node.name)
+        )}
+        <span className="truncate">{node.name}</span>
+        {node.type === 'directory' ? (
+          <span className="text-[10px] text-indigo-400 shrink-0">目录</span>
+        ) : (
+          node.size ? (
+            <span className="text-[10px] text-slate-400 shrink-0">
+              {node.size >= 1024 ? `${(node.size / 1024).toFixed(1)} KB` : `${node.size} B`}
+            </span>
+          ) : null
+        )}
+      </div>,
+    );
+    if (node.type === 'directory' && node.children?.length) {
+      renderZipTree(node.children, depth + 1, acc, limit);
+    }
+  }
 }
 
 /**
@@ -174,6 +244,9 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
   onClose,
   onSubmit,
   onToast,
+  parentSkillId,
+  parentSkillName,
+  defaultSupersedeMode,
 }) => {
   // 表单字段
   const [name, setName] = useState('');
@@ -183,6 +256,12 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
   const [categoryOptions, setCategoryOptions] = useState<SkillCategoryItem[]>([]);
   // 原始 ZIP 的 base64（选择文件时转换，随提交入库保证无损）
   const [zipBufferBase64, setZipBufferBase64] = useState('');
+  // 多版本发布：替代模式（仅在传了 parentSkillId 时生效）
+  const [supersedeMode, setSupersedeMode] = useState<'coexist' | 'replace'>(
+    defaultSupersedeMode || 'coexist',
+  );
+  // 版本号（用户可自填，默认 v1.0.0；多版本发布时建议自填并加版本号后缀）
+  const [version, setVersion] = useState('v1.0.0');
 
   useEffect(() => {
     api
@@ -284,7 +363,7 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
       id: `skill-${Date.now()}`,
       name: name.trim(),
       slug: `@skillhub/${name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'skill'}`,
-      version: 'v1.0.0',
+      version: version.trim() || 'v1.0.0',
       description: description.trim(),
       expertDomain: 'fullstack',
       category,
@@ -343,7 +422,10 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
         regexResults: [],
         llmResults: [],
       },
-    };
+      // 多版本发布：附带到本地 SkillItem，让 App.tsx 的 handleCreateSkill 透传
+      parentSkillId,
+      supersedeMode,
+    } as any;
 
     onSubmit(newSkill);
     onToast('success', '提交审核成功', '您的插件已进入管理员审核队列，可在「个人中心」跟踪进度！');
@@ -354,7 +436,7 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
     <Modal
       isOpen
       onClose={onClose}
-      size="2xl"
+      size="4xl"
       align="top"
       containerClassName="pt-10 sm:pt-16"
       panelClassName="!overflow-hidden"
@@ -362,10 +444,14 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
         <div className="min-w-0">
           <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
             <Upload className="w-5 h-5 text-indigo-600 shrink-0" />
-            <span className="truncate">发布新技能 / 插件</span>
+            <span className="truncate">
+              {parentSkillId ? `发布新版本：${parentSkillName || '现有技能'}` : '发布新技能 / 插件'}
+            </span>
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            上传插件源码 ZIP 包并填写基本信息，提交后自动进入管理员审核
+            {parentSkillId
+              ? '新版本将作为子记录入库，审核通过后才会对其他用户可见'
+              : '上传插件源码 ZIP 包并填写基本信息，提交后自动进入管理员审核'}
           </p>
         </div>
       }
@@ -412,10 +498,10 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
               <label className="block font-bold text-slate-800 mb-1">
                 技术分类
               </label>
-              <select
+              <Select
+                size="md"
                 value={category}
                 onChange={e => setCategory(e.target.value as SkillCategory)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
               >
                 {categoryOptions.length > 0
                   ? categoryOptions.map(cat => (
@@ -433,13 +519,21 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
                         <option value="agent">自主决策智能体 (Agent)</option>
                       </>
                     )}
-              </select>
+              </Select>
             </div>
 
-            <div className="flex items-end">
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                版本号、唯一标识等将根据名称自动生成，审核通过后可在市场详情中查看。
-              </p>
+            <div>
+              <label className="block font-bold text-slate-800 mb-1">
+                版本号 <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={version}
+                onChange={e => setVersion(e.target.value)}
+                placeholder={parentSkillId ? '例：v1.2.0' : 'v1.0.0'}
+                maxLength={20}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 text-xs focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
+              />
             </div>
 
             <div className="sm:col-span-2">
@@ -454,6 +548,46 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 text-xs focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
               />
             </div>
+
+            {/* 多版本发布：替代模式选择器（仅在传了 parentSkillId 时显示） */}
+            {parentSkillId && (
+              <div className="sm:col-span-2 p-3.5 rounded-xl bg-indigo-50/60 border border-indigo-200/80 space-y-2">
+                <div className="text-xs font-bold text-indigo-900 flex items-center gap-1.5">
+                  <GitBranch className="w-3.5 h-3.5" />
+                  新版本发布模式
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors ${supersedeMode === 'coexist' ? 'border-indigo-400 bg-white' : 'border-slate-200 bg-white/50 hover:bg-white'}`}>
+                    <input
+                      type="radio"
+                      name="supersedeMode"
+                      value="coexist"
+                      checked={supersedeMode === 'coexist'}
+                      onChange={() => setSupersedeMode('coexist')}
+                      className="mt-0.5"
+                    />
+                    <div className="text-xs">
+                      <div className="font-bold text-slate-800">保留共存</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">新版独立计 counter；旧版保持 approved 不动，详情页可手动切换</div>
+                    </div>
+                  </label>
+                  <label className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors ${supersedeMode === 'replace' ? 'border-indigo-400 bg-white' : 'border-slate-200 bg-white/50 hover:bg-white'}`}>
+                    <input
+                      type="radio"
+                      name="supersedeMode"
+                      value="replace"
+                      checked={supersedeMode === 'replace'}
+                      onChange={() => setSupersedeMode('replace')}
+                      className="mt-0.5"
+                    />
+                    <div className="text-xs">
+                      <div className="font-bold text-slate-800">替代旧版</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">新版从旧版继承 counter 起点；审核通过时旧版自动 archive</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ZIP 上传组件（核心） */}
@@ -502,7 +636,7 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-emerald-900 truncate">{zipFile?.name}</div>
                       <div className="text-[11px] text-emerald-700">
-                        {zipTree.length} 个文件 · {(zipFile?.size || 0) / 1024 >= 1024
+                        {countZipFiles(zipTree)} 个文件 · {(zipFile?.size || 0) / 1024 >= 1024
                           ? `${((zipFile?.size || 0) / 1024 / 1024).toFixed(1)} MB`
                           : `${Math.round((zipFile?.size || 0) / 1024)} KB`}
                       </div>
@@ -519,29 +653,21 @@ export const UploadSkillModal: React.FC<UploadSkillModalProps> = ({
                   </div>
                 </div>
 
-                {/* 文件树预览 */}
+                {/* 文件树预览：递归渲染层级结构，仅展示目录与文件名，不含文件内容 */}
                 <div className="p-3.5 max-h-56 overflow-y-auto">
                   <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 mb-2">
                     <FolderTree className="w-3.5 h-3.5" />
-                    源码树预览
+                    源码树预览（层级结构）
                   </div>
                   <div className="space-y-1">
-                    {zipTree.slice(0, 60).map(node => (
-                      <div key={node.id || node.name} className="flex items-center gap-1.5 text-slate-600">
-                        {fileIconFor(node.name)}
-                        <span className="truncate">{node.name}</span>
-                        {node.type === 'file' && node.size ? (
-                          <span className="text-[10px] text-slate-400 ml-auto shrink-0">
-                            {node.size >= 1024 ? `${(node.size / 1024).toFixed(1)} KB` : `${node.size} B`}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-indigo-400 ml-auto shrink-0">目录</span>
-                        )}
-                      </div>
-                    ))}
-                    {zipTree.length > 60 && (
+                    {(() => {
+                      const acc: React.ReactNode[] = [];
+                      renderZipTree(zipTree, 0, acc, 200);
+                      return acc;
+                    })()}
+                    {countZipFiles(zipTree) > 200 && (
                       <div className="text-[11px] text-slate-400 text-center pt-1">
-                        仅展示前 60 项，共 {zipTree.length} 个文件
+                        仅展示前 200 项，共 {countZipFiles(zipTree)} 个文件
                       </div>
                     )}
                   </div>

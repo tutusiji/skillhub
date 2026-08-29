@@ -19,11 +19,15 @@ import {
   ArrowUpCircle,
   Trash2,
   PackageCheck,
-  PackageX
+  PackageX,
+  Save
 } from 'lucide-react';
-import { AuditExecutionSummary, AuditRule, DeepSeekConfig, SkillItem, UserAccount } from '../types';
-import { executeDualEngineAudit } from '../utils/auditRunner';
-import { api, mapApiSkill } from '../services/api';
+import { AuditExecutionSummary, SkillItem, UserAccount } from '../types';
+import {
+  buildScanPayloadFromSkill,
+  mapServerScanToSummary,
+} from '../utils/auditRunner';
+import { api, mapApiSkill, type ApiSandboxScanResult } from '../services/api';
 import { AuditReportInspector } from './AuditReportInspector';
 import { FileTreeViewer } from './FileTreeViewer';
 import { PopconfirmBubble } from './PopconfirmBubble';
@@ -32,8 +36,6 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 interface AuditManagementViewProps {
   currentUser: UserAccount;
   skills: SkillItem[];
-  rules: AuditRule[];
-  deepseekConfig?: DeepSeekConfig;
   onApproveSkill: (id: string, feedback?: string) => void;
   onRejectSkill: (id: string, feedback: string) => void;
   onDelistSkill?: (id: string) => void;
@@ -46,8 +48,6 @@ interface AuditManagementViewProps {
 export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
   currentUser,
   skills,
-  rules,
-  deepseekConfig,
   onApproveSkill,
   onRejectSkill,
   onDelistSkill,
@@ -60,7 +60,11 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
   const [searchKeyword, setSearchKeyword] = useState('');
   const [inspectingSkill, setInspectingSkill] = useState<SkillItem | null>(null);
   const [isScanningId, setIsScanningId] = useState<string | null>(null);
-  const [scanProgressText, setScanProgressText] = useState('');
+  // 工作台体检预览草稿：runSandboxScan 只扫描不落库，管理员点「保存扫描结果」后才入库
+  const [scanDraft, setScanDraft] = useState<{
+    summary: AuditExecutionSummary;
+    raw: ApiSandboxScanResult;
+  } | null>(null);
 
   // Rejection feedback state in modal
   const [rejectFeedback, setRejectFeedback] = useState('');
@@ -124,6 +128,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
     setDetailLoadingId(null);
     setShowRejectInput(false);
     setModalTab('readme');
+    setScanDraft(null);
   }, []);
   useEscapeKey(closeInspector, inspectingSkill !== null);
 
@@ -152,33 +157,66 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
   const offlineCount = skills.filter(s => s.status === 'offline').length;
   const rejectedCount = skills.filter(s => s.status === 'rejected').length;
 
-  const handleRunScan = async (skill: SkillItem) => {
+  /**
+   * 审核工作台「运行体检」：调用后端 sandbox-scan 实时扫描（只扫描不落库），
+   * 结果作为草稿预览给管理员确认，确认后点「保存扫描结果」才写入 audit_reports。
+   */
+  const handleWorkbenchScan = async (skill: SkillItem) => {
+    if (!skill) return;
     setIsScanningId(skill.id);
     try {
-      const summary = await executeDualEngineAudit(
-        skill,
-        rules,
-        (progress) => {
-          setScanProgressText(progress);
-        },
-        deepseekConfig
+      const payload = buildScanPayloadFromSkill(skill);
+      const raw = await api.runSandboxScan(payload, skill.id);
+      const summary = mapServerScanToSummary(raw, {
+        reviewedBy: currentUser?.name,
+        reviewedAt: new Date().toISOString(),
+      });
+      setScanDraft({ summary, raw });
+      onToast(
+        'success',
+        '双引擎体检完成',
+        `《${skill.name}》本次体检得分 ${raw.score} 分，确认后点击「保存扫描结果」入库`
       );
-      onUpdateSkillAudit(skill.id, summary);
-      if (inspectingSkill && inspectingSkill.id === skill.id) {
-        setInspectingSkill({
-          ...inspectingSkill,
-          auditResults: summary
-        });
-      }
-      onToast('success', '双引擎扫描完成', `${skill.name} 安全得分: ${summary.score} 分`);
     } catch (err) {
       console.error(err);
-      onToast('error', '扫描失败', '执行扫描时发生异常');
+      onToast('error', '体检失败', '双引擎扫描执行异常，请稍后重试');
     } finally {
       setIsScanningId(null);
-      setScanProgressText('');
     }
   };
+
+  /**
+   * 审核工作台「保存扫描结果」：把刚跑出的体检结果显式落库并回写 auditScore。
+   * 只有保存后，详情页/列表等其它地方才能拉取到这份检测结果，审批门槛也才满足。
+   */
+  const handleSaveScanResult = async (skill: SkillItem) => {
+    if (!skill || !scanDraft) return;
+    setIsScanningId(skill.id);
+    try {
+      await api.saveAuditReport(skill.id, scanDraft.raw);
+      // 同步回写 App 层技能状态，使列表/详情/审批门槛拿到已保存得分与完整明细
+      onUpdateSkillAudit(skill.id, scanDraft.summary);
+      setInspectingSkill((prev) =>
+        prev && prev.id === skill.id
+          ? { ...prev, auditResults: scanDraft.summary }
+          : prev
+      );
+      setScanDraft(null);
+      onToast(
+        'success',
+        '扫描结果已保存',
+        `《${skill.name}》体检结果已入库，得分 ${scanDraft.summary.score} 分，可批准上架`
+      );
+    } catch (err) {
+      console.error(err);
+      onToast('error', '保存失败', '体检结果入库失败，请稍后重试');
+    } finally {
+      setIsScanningId(null);
+    }
+  };
+
+  /** 放弃本次体检预览草稿，回到已保存报告（或未体检）状态 */
+  const handleDiscardDraft = () => setScanDraft(null);
 
   const handleApprove = (skillId: string) => {
     onApproveSkill(skillId, '符合内网安全与架构质量规范，予以放行上线。');
@@ -350,7 +388,6 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
           </div>
         ) : (
           filteredSkills.map(skill => {
-            const isScanning = isScanningId === skill.id;
             const isPending = skill.status === 'pending';
             const isApproved = skill.status === 'approved';
             const isOffline = skill.status === 'offline';
@@ -419,35 +456,20 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
                   <div className="text-center px-3.5 py-2 rounded-2xl bg-slate-50 border border-slate-200">
                     <span className="text-[10px] text-slate-500 block font-semibold">双引擎得分</span>
                     <span className={`text-base font-extrabold ${
-                      skill.auditResults.score >= 90 ? 'text-emerald-600' :
-                      skill.auditResults.score >= 60 ? 'text-amber-600' : 'text-rose-600'
+                      skill.auditResults.overallStatus === 'pending'
+                        ? 'text-slate-500'
+                        : skill.auditResults.overallStatus === 'failed'
+                          ? 'text-rose-600'
+                          : skill.auditResults.overallStatus === 'warning'
+                            ? 'text-amber-600'
+                            : 'text-emerald-600'
                     }`}>
-                      {skill.auditResults.score} 分
+                      {skill.auditResults.score != null ? `${skill.auditResults.score} 分` : '未体检'}
                     </span>
                   </div>
 
                   {/* Actions Bar */}
                   <div className="flex items-center gap-2 flex-wrap">
-                    {/* Dual Engine Re-Scan */}
-                    <button
-                      onClick={() => handleRunScan(skill)}
-                      disabled={isScanning}
-                      className="px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50 border border-indigo-200/80"
-                      title="重新执行双引擎扫描"
-                    >
-                      {isScanning ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>扫描中...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="w-3.5 h-3.5" />
-                          <span>重扫</span>
-                        </>
-                      )}
-                    </button>
-
                     {/* Published / Approved Status Controls: Delist & Relist */}
                     {isApproved && (
                       <PopconfirmBubble
@@ -510,6 +532,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
                       onClick={() => {
                         setInspectingSkill(skill);
                         setShowRejectInput(false);
+                        setScanDraft(null);
                       }}
                       className="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold flex items-center gap-1.5 hover:bg-slate-800 transition-colors shadow-2xs active:scale-95"
                     >
@@ -593,7 +616,7 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
                 }`}
               >
                 <ShieldCheck className="w-4 h-4" />
-                <span>双引擎安全体检报告 ({inspectingSkill.auditResults.score}分)</span>
+                <span>双引擎安全体检报告 ({inspectingSkill.auditResults.score != null ? `${inspectingSkill.auditResults.score}分` : '未体检'})</span>
               </button>
             </div>
 
@@ -652,12 +675,77 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
               )}
 
               {modalTab === 'audit' && (
-                <AuditReportInspector
-                  summary={inspectingSkill.auditResults}
-                  onReScan={() => handleRunScan(inspectingSkill)}
-                  isScanning={isScanningId === inspectingSkill.id}
-                  onViewFileInTree={() => setModalTab('files')}
-                />
+                <div className="space-y-4">
+                  {/* 体检操作条：运行体检（只扫描不落库）→ 确认后保存扫描结果（入库） */}
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="text-xs text-slate-600 leading-relaxed">
+                      {scanDraft ? (
+                        <>
+                          本次体检预览得分{' '}
+                          <b className="text-indigo-700 text-sm">{scanDraft.summary.score} 分</b>{' '}
+                          · 确认无误后点击「保存扫描结果」入库，未保存前其它页面拉取不到这份检测结果。
+                        </>
+                      ) : inspectingSkill.auditResults.score != null ? (
+                        <>
+                          已保存体检结果{' '}
+                          <b className="text-emerald-700 text-sm">{inspectingSkill.auditResults.score} 分</b>
+                          。如需更新可重新运行体检并再次保存。
+                        </>
+                      ) : (
+                        <>
+                          该技能尚未体检。运行双引擎体检获得安全得分后，保存扫描结果即可批准上架。
+                        </>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {scanDraft && (
+                        <button
+                          onClick={handleDiscardDraft}
+                          disabled={isScanningId === inspectingSkill.id}
+                          className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>放弃本次结果</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleWorkbenchScan(inspectingSkill)}
+                        disabled={isScanningId === inspectingSkill.id}
+                        id="btn-workbench-scan"
+                        className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50 shadow-sm"
+                      >
+                        {isScanningId === inspectingSkill.id ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>双引擎体检扫描中...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-200" />
+                            <span>{inspectingSkill.auditResults.score != null ? '重新运行体检' : '运行双引擎体检'}</span>
+                          </>
+                        )}
+                      </button>
+                      {scanDraft && (
+                        <button
+                          onClick={() => handleSaveScanResult(inspectingSkill)}
+                          disabled={isScanningId === inspectingSkill.id}
+                          id="btn-save-scan-result"
+                          className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50 shadow-sm"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          <span>保存扫描结果</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <AuditReportInspector
+                    summary={scanDraft?.summary ?? inspectingSkill.auditResults}
+                    isScanning={isScanningId === inspectingSkill.id}
+                    onViewFileInTree={() => setModalTab('files')}
+                  />
+                </div>
               )}
             </div>
 
@@ -789,13 +877,24 @@ export const AuditManagementView: React.FC<AuditManagementViewProps> = ({
                       </button>
                     )}
 
-                    <button
-                      onClick={() => handleApprove(inspectingSkill.id)}
-                      className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md active:scale-95"
-                    >
-                      <Check className="w-4 h-4" />
-                      <span>批准上线</span>
-                    </button>
+                    {inspectingSkill.auditResults.score == null ? (
+                      /* 未体检技能不可上架：审批门槛——必须先保存扫描结果 */
+                      <span
+                        title="请先在「双引擎安全体检报告」页运行体检并保存扫描结果后，才能批准上架"
+                        className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-slate-100 text-slate-400 text-xs font-bold border border-slate-200 cursor-not-allowed"
+                      >
+                        <AlertTriangle className="w-4 h-4" />
+                        <span>未体检 · 不可批准</span>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleApprove(inspectingSkill.id)}
+                        className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md active:scale-95"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>批准上线</span>
+                      </button>
+                    )}
                   </>
                 )}
               </div>

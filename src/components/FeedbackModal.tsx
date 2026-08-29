@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { MessageSquarePlus, Star, Send } from 'lucide-react';
 import { UserAccount } from '../types';
 import { Modal } from './Modal';
+import { Select } from './Select';
 
 interface FeedbackModalProps {
   currentUser: UserAccount;
@@ -82,17 +83,17 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({
             <label className="block font-bold text-slate-800 mb-1">
               建议类别
             </label>
-            <select
+            <Select
+              size="md"
               value={category}
               onChange={(e) => setCategory(e.target.value as any)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
             >
               <option value="feature">新功能需求建议 (Feature Request)</option>
               <option value="security">安全审核规则改进建议 (Security Rule)</option>
               <option value="experience">交互体验与文件树预览 (UI / UX)</option>
               <option value="bug">缺陷与异常报告 (Bug Report)</option>
               <option value="other">其他建议 (Other)</option>
-            </select>
+            </Select>
           </div>
 
           <div>

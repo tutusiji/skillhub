@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   ArrowLeft,
   Download, 
@@ -20,17 +20,20 @@ import {
   Code2,
   ChevronRight,
   Share2,
-  RefreshCw,
   Cpu,
   UserCheck,
-  ArrowDownCircle
+  ArrowDownCircle,
+  GitBranch,
+  Loader2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { SkillItem } from '../types';
+import { SkillItem, AuditExecutionSummary } from '../types';
+import { api, mapApiSkill } from '../services/api';
 import { FileTreeViewer } from './FileTreeViewer';
 import { AuditReportInspector } from './AuditReportInspector';
 import { getMarketplaceAddCommand, getMarketplaceUpdateCommand } from '../utils/marketplace';
 import { Avatar } from './Avatar';
+import { Select } from './Select';
 
 interface SkillDetailPageProps {
   skill: SkillItem;
@@ -41,6 +44,21 @@ interface SkillDetailPageProps {
   onReScanSkill?: (skill: SkillItem) => void;
   isScanning?: boolean;
   onCopySuccess: (msg: string) => void;
+  /**
+   * 当前登录用户：用于判定是否显示版本选择器
+   * 公开用户不显示，只有 owner 或 admin 看到 picker
+   */
+  currentUser?: { id: string; role: string } | null;
+  /**
+   * 切换到指定历史版本（owner / admin 用）
+   * 不传则禁用 picker 交互
+   */
+  onSelectVersion?: (skill: SkillItem) => void;
+  /**
+   * 源码文件树是否仍在后台加载（大插件详情不阻塞整页，文件树区域单独转圈）
+   * 列表/详情接口都不含大源码时置 true，到货后 App 回填 skill.fileTree 再转 false
+   */
+  fileTreeLoading?: boolean;
 }
 
 type TabKey = 'readme' | 'files' | 'audit' | 'install' | 'permissions';
@@ -53,7 +71,10 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
   onDownloadZip,
   onReScanSkill,
   isScanning = false,
-  onCopySuccess
+  onCopySuccess,
+  currentUser,
+  onSelectVersion,
+  fileTreeLoading = false,
 }) => {
   const [activeTab, setActiveTab] = useState<TabKey>('readme');
   const [activeCliTab, setActiveCliTab] = useState<'claude' | 'cursor' | 'mcp' | 'cli'>('claude');
@@ -61,6 +82,93 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
   const [copiedMarketCmd, setCopiedMarketCmd] = useState(false);
   const [copiedMarketUpdateCmd, setCopiedMarketUpdateCmd] = useState(false);
   const [highlightedFileInTree, setHighlightedFileInTree] = useState<string | undefined>(undefined);
+
+  // 多版本发布：版本选择器状态（仅 owner / admin 可见）
+  // 通过 api.getSkillVersions 拉取完整版本链，archived 仅 owner/admin 可见由后端收敛
+  const [versions, setVersions] = useState<SkillItem[] | null>(null);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const isOwnerOrAdmin =
+    !!currentUser &&
+    (currentUser.role === 'admin' ||
+      currentUser.role === 'super_admin' ||
+      currentUser.id === skill.submitterId);
+
+  useEffect(() => {
+    if (!isOwnerOrAdmin) {
+      setVersions(null);
+      return;
+    }
+    // 只有当技能在版本链上（parentSkillId 存在，或者有 sibling）才拉取
+    // 简化：只要不是单版本（链长 1），就拉一次
+    let cancelled = false;
+    setVersionsLoading(true);
+    api
+      .getSkillVersions(skill.id)
+      .then(list => {
+        if (cancelled) return;
+        const mapped = (list as any[]).map(mapApiSkill);
+        setVersions(mapped.length > 1 ? mapped : null);
+      })
+      .catch(() => {
+        if (!cancelled) setVersions(null);
+      })
+      .finally(() => {
+        if (!cancelled) setVersionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skill.id, isOwnerOrAdmin]);
+
+  // —— 双引擎审计报告明细：独立接口按需拉取，不阻塞整页 ——
+  // 列表/详情接口只带分数（auditScore），正则命中与 LLM 语义研判明细在
+  // audit_reports 表里，通过 /skills/:id/audit-report 单独取数。打开审计 tab
+  // 时才请求，加载完成前该区域显示遮罩，其余内容（README/安装/权限）先行展示。
+  const [auditSummary, setAuditSummary] = useState<AuditExecutionSummary>(
+    skill.auditResults,
+  );
+  const [auditLoading, setAuditLoading] = useState(false);
+  // 记录已拉取报告明细的技能 ID，避免同技能重复请求；切换技能后自动失效
+  const auditFetchedFor = useRef<string | null>(null);
+
+  // 技能切换 / 外部重新体检后，审计摘要以当前 skill.auditResults 为准
+  // （重新体检会拿到完整明细，直接展示无需再请求）
+  useEffect(() => {
+    setAuditSummary(skill.auditResults);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skill.id, skill.auditResults]);
+
+  useEffect(() => {
+    if (activeTab !== 'audit') return;
+    if (auditFetchedFor.current === skill.id) return;
+
+    let cancelled = false;
+    setAuditLoading(true);
+    api
+      .getSkillAuditReport(skill.slug || skill.id)
+      .then(summary => {
+        if (cancelled) return;
+        auditFetchedFor.current = skill.id;
+        setAuditSummary(prev => ({
+          ...prev,
+          ...summary,
+          // 保留本地已有的管理员反馈（驳回/下架原因），避免被服务端摘要覆盖
+          adminFeedback: summary.adminFeedback ?? prev.adminFeedback,
+        }));
+      })
+      .catch(() => {
+        // 拉取失败保留分数视图，不中断页面
+        if (!cancelled) auditFetchedFor.current = skill.id;
+      })
+      .finally(() => {
+        if (!cancelled) setAuditLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, skill.id]);
 
   // 首次接入企业市场的前置注册命令 (Claude Code 必须先 add 市场才能 install 插件)
   const marketplaceAddCommand = getMarketplaceAddCommand();
@@ -158,10 +266,48 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
               <span className="text-xs font-mono font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
                 {skill.version}
               </span>
+
+              {/* 多版本发布：版本选择器（仅 owner / admin 可见且链长 ≥ 2） */}
+              {isOwnerOrAdmin && versions && versions.length > 1 && onSelectVersion && (
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-indigo-50 border border-indigo-200">
+                  <GitBranch className="w-3.5 h-3.5 text-indigo-600" />
+                  <span className="text-[11px] font-bold text-indigo-700">版本</span>
+                  <Select
+                    size="sm"
+                    variant="ghost"
+                    value={skill.id}
+                    onChange={e => {
+                      const next = versions.find(v => v.id === e.target.value);
+                      if (next) {
+                        // 同步 URL：?v=<versionId> 便于分享
+                        const u = new URL(window.location.href);
+                        u.searchParams.set('v', next.id);
+                        window.history.replaceState({}, '', u.toString());
+                        onSelectVersion(next);
+                      }
+                    }}
+                    className="font-mono font-semibold text-slate-800"
+                    title="切换到该技能链上的其他历史版本"
+                  >
+                    {versions.map(v => (
+                      <option key={v.id} value={v.id}>
+                        {v.version}
+                        {v.id === skill.id ? ' (当前)' : ''}
+                        {v.status === 'archived' ? ' · 已归档' : ''}
+                        {v.status === 'pending' ? ' · 审核中' : ''}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
+
+              {isOwnerOrAdmin && versionsLoading && (
+                <span className="text-[11px] text-slate-400">加载版本中…</span>
+              )}
               {isApproved && (
                 <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 flex items-center gap-1.5 shadow-2xs">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>双引擎安全审计通过 ({skill.auditResults.score}分)</span>
+                  <span>双引擎安全审计通过 ({skill.auditResults.score != null ? `${skill.auditResults.score}分` : '未体检'})</span>
                 </span>
               )}
               {isOffline && (
@@ -173,7 +319,7 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
               {isPending && (
                 <span className="text-xs font-semibold text-amber-800 bg-amber-50 px-3 py-1 rounded-full border border-amber-200 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                  <span>等待管理员终审 ({skill.auditResults.score}分)</span>
+                  <span>{skill.auditResults.score != null ? `等待管理员终审 (${skill.auditResults.score}分)` : '等待管理员体检'}</span>
                 </span>
               )}
               {isRejected && (
@@ -183,6 +329,17 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
                 </span>
               )}
             </div>
+
+            {/* 管理员驳回意见：驳回理由展示给作者整改（mapApiSkill 映射到 auditResults.adminFeedback） */}
+            {isRejected && skill.auditResults?.adminFeedback && (
+              <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
+                <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong>管理员驳回意见：</strong>
+                  <span>{skill.auditResults.adminFeedback}</span>
+                </div>
+              </div>
+            )}
 
             <div className="text-xs text-slate-500 font-mono">
               发布于 {new Date(skill.createdAt).toLocaleDateString('zh-CN')} · 最近更新 {new Date(skill.updatedAt).toLocaleDateString('zh-CN')}
@@ -277,17 +434,27 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
                 <span>{skill.isLiked ? '已点赞' : '点赞'}</span>
               </button>
 
-              {onReScanSkill && (
-                <button
-                  onClick={() => onReScanSkill(skill)}
-                  disabled={isScanning}
-                  className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
-                  title="重新执行双引擎体检"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin text-indigo-600' : 'text-slate-500'}`} />
-                  <span>{isScanning ? '体检中...' : '重新体检'}</span>
-                </button>
-              )}
+              {/* 分享按钮：复制当前详情页 URL 至剪贴板（不可用时降级为提示）
+                  注：重新体检按钮已移除——该能力属管理员审核工作台，公开详情页不宜暴露 */}
+              <button
+                onClick={async () => {
+                  try {
+                    if (navigator.clipboard?.writeText) {
+                      await navigator.clipboard.writeText(window.location.href);
+                      onCopySuccess('已复制当前页面 URL，快粘贴给同事安装吧～');
+                    } else {
+                      onCopySuccess(window.location.href);
+                    }
+                  } catch {
+                    onCopySuccess(window.location.href);
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-all active:scale-95"
+                title="复制当前页面链接，分享给同事一键安装"
+              >
+                <Share2 className="w-3.5 h-3.5 text-slate-500" />
+                <span>分享</span>
+              </button>
             </div>
 
             {/* Quick CLI copy in Header */}
@@ -347,9 +514,15 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
           <Shield className="w-4 h-4" />
           <span>双引擎安全审计报告</span>
           <span className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${
-            skill.auditResults.score >= 90 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+            skill.auditResults.overallStatus === 'pending'
+              ? 'bg-slate-100 text-slate-600'
+              : skill.auditResults.overallStatus === 'failed'
+                ? 'bg-rose-100 text-rose-800'
+                : skill.auditResults.overallStatus === 'warning'
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-emerald-100 text-emerald-800'
           }`}>
-            {skill.auditResults.score}分
+            {skill.auditResults.score != null ? `${skill.auditResults.score}分` : '未体检'}
           </span>
         </button>
 
@@ -395,7 +568,7 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
         {activeTab === 'files' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between text-xs text-slate-600 bg-white p-4 rounded-2xl border border-slate-200">
-              <span>ZIP 包内源码文件树（点击左侧文件查看代码，点击右上角复制）：</span>
+              <span>ZIP 包内源码文件树：</span>
               <button
                 onClick={() => onDownloadZip(skill)}
                 className="text-indigo-600 hover:underline flex items-center gap-1.5 font-bold"
@@ -403,23 +576,42 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
                 <Download className="w-4 h-4" /> 打包导出 ZIP
               </button>
             </div>
-            <FileTreeViewer 
-              tree={skill.fileTree} 
-              defaultSelectedPath={highlightedFileInTree}
-              onCopyFile={(filename) => onCopySuccess(`已复制文件 ${filename} 源码`)}
-            />
+            {(skill.fileTree || []).length === 0 && fileTreeLoading ? (
+              /* 大插件源码仍在前台/后台加载：该区域单独遮罩，不阻塞整页 */
+              <div className="rounded-3xl bg-white border border-slate-200 shadow-sm p-12 flex flex-col items-center justify-center gap-3 text-xs text-slate-400">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>源码体积较大，正在加载文件树…</span>
+              </div>
+            ) : (
+              <FileTreeViewer
+                tree={skill.fileTree}
+                defaultSelectedPath={highlightedFileInTree}
+                onCopyFile={filename => onCopySuccess(`已复制文件 ${filename} 源码`)}
+              />
+            )}
           </div>
         )}
 
         {/* 3. DUAL-ENGINE AUDIT REPORT TAB */}
         {activeTab === 'audit' && (
           <div>
-            <AuditReportInspector 
-              summary={skill.auditResults}
-              onReScan={onReScanSkill ? () => onReScanSkill(skill) : undefined}
-              isScanning={isScanning}
-              onViewFileInTree={handleViewFileFromAudit}
-            />
+            {auditLoading ? (
+              /* 报告明细独立接口按需拉取：加载中给遮罩，其余 tab 数据不受影响 */
+              <div className="rounded-3xl bg-white border border-slate-200 shadow-sm p-12 flex flex-col items-center justify-center gap-3 text-xs text-slate-400">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>正在加载安全审计报告明细…</span>
+              </div>
+            ) : (
+              <AuditReportInspector
+                summary={auditSummary}
+                onReScan={onReScanSkill ? () => onReScanSkill(skill) : undefined}
+                isScanning={isScanning}
+                onViewFileInTree={handleViewFileFromAudit}
+                // 详情页面向普通用户，不展示「管理员终审反馈」：
+                // 已上架时它是「审核通过」之类的泛化文案，驳回理由上方已有独立块
+                showAdminFeedback={false}
+              />
+            )}
           </div>
         )}
 

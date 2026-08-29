@@ -40,6 +40,7 @@ import { EXPERT_DOMAINS, getExpertDomainMeta } from '../data/expertDomains';
 import { api } from '../services/api';
 import { useExpertDomains } from '../hooks/useExpertDomains';
 import { Avatar } from './Avatar';
+import { Select } from './Select';
 
 interface MarketplaceViewProps {
   skills: SkillItem[];
@@ -171,8 +172,19 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
 
   // 首页仅展示已审核通过（approved）的技能
   // 待审核（pending）、已驳回（rejected）、已下架（offline）一律不出现在集市
+  //
+  // 同一插件的所有版本共享 slug：对外一个插件只展示一个卡片（取最新已上架版本），
+  // 历史版本只存在于个人中心/管理视图的「版本记录」中。
   const approvedSkills = useMemo(() => {
-    return skills.filter(s => s.status === 'approved');
+    const bySlug = new Map<string, SkillItem>();
+    for (const s of skills) {
+      if (s.status !== 'approved') continue;
+      const current = bySlug.get(s.slug);
+      if (!current || new Date(s.createdAt).getTime() > new Date(current.createdAt).getTime()) {
+        bySlug.set(s.slug, s);
+      }
+    }
+    return [...bySlug.values()];
   }, [skills]);
 
   // Featured Top Skills for the Home Featured Carousel
@@ -207,7 +219,7 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
     }).sort((a, b) => {
       if (sortBy === 'popular') return b.downloads - a.downloads;
       if (sortBy === 'stars') return b.stars - a.stars;
-      if (sortBy === 'score') return b.auditResults.score - a.auditResults.score;
+      if (sortBy === 'score') return (b.auditResults.score ?? 0) - (a.auditResults.score ?? 0);
       if (sortBy === 'newest') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       return 0;
     });
@@ -328,7 +340,7 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
 
                     <div className="flex items-center gap-1 text-[11px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
                       <ShieldCheck className="w-3 h-3" />
-                      <span>{skill.auditResults.score}分</span>
+                      <span>{skill.auditResults.score != null ? `${skill.auditResults.score}分` : '未体检'}</span>
                     </div>
                   </div>
 
@@ -541,16 +553,16 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
 
           {/* Sort selector */}
           <div className="flex items-center gap-2 shrink-0">
-            <select
+            <Select
+              size="sm"
               value={sortBy}
               onChange={e => setSortBy(e.target.value as any)}
-              className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 font-bold outline-none cursor-pointer"
             >
               <option value="popular">🔥 按热门下载排序</option>
               <option value="stars">⭐ 按最多收藏排序</option>
               <option value="score">🛡️ 按安全体检得分排序</option>
               <option value="newest">🕒 按最新发布排序</option>
-            </select>
+            </Select>
           </div>
         </div>
 
@@ -681,7 +693,7 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
                         <td className="py-3.5 px-4 whitespace-nowrap">
                           <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
                             <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                            <span>{skill.auditResults.score}分 通过</span>
+                            <span>{skill.auditResults.score != null ? `${skill.auditResults.score}分` : '未体检'} 通过</span>
                           </div>
                         </td>
 

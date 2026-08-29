@@ -29,6 +29,7 @@ import { useExpertDomains } from '../hooks/useExpertDomains';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { PopconfirmBubble } from './PopconfirmBubble';
 import { Avatar } from './Avatar';
+import { Select } from './Select';
 
 interface SkillDemandMarketViewProps {
   demands: SkillDemand[];
@@ -273,27 +274,27 @@ export const SkillDemandMarketView: React.FC<SkillDemandMarketViewProps> = ({
         {/* Filters and Sort */}
         <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
           {/* Status Filter */}
-          <select
+          <Select
+            size="sm"
             value={selectedStatus}
             onChange={e => setSelectedStatus(e.target.value)}
-            className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
           >
             <option value="all">全部状态</option>
             <option value="open">🔥 征集中</option>
             <option value="fulfilled">✅ 已完结</option>
             {canManage && <option value="pending">⏳ 待管理员审核</option>}
             {canManage && <option value="rejected">❌ 已驳回</option>}
-          </select>
+          </Select>
 
           {/* Sort */}
-          <select
+          <Select
+            size="sm"
             value={sortBy}
             onChange={e => setSortBy(e.target.value as any)}
-            className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
           >
             <option value="bounty_desc">奖励积分从高到低</option>
             <option value="latest">⏱️ 最新发布时间</option>
-          </select>
+          </Select>
 
           {/* View Switcher (卡片 / 列表，持久化用户偏好) */}
           <div className="flex items-center p-1 bg-slate-100 rounded-2xl border border-slate-200/80">

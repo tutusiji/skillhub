@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { 
   Plus, 
   Trash2, 
@@ -29,13 +29,13 @@ import {
   Filter,
   RotateCcw,
   SlidersHorizontal,
-  Lock,
   ChevronRight
 } from 'lucide-react';
 import { AuditRule, DeepSeekConfig, RuleSeverity, RuleType, UserAccount } from '../types';
 import { PopconfirmBubble } from './PopconfirmBubble';
 import { Modal } from './Modal';
-import { api, type ApiLlmConfig } from '../services/api';
+import { Select } from './Select';
+import { api, type ApiLlmConfig, type ApiSandboxScanResult } from '../services/api';
 
 /** 大模型网关厂商快捷预设：一键回填基址与默认模型 */
 const PROVIDER_PRESETS: Array<{
@@ -46,7 +46,7 @@ const PROVIDER_PRESETS: Array<{
 }> = [
   {
     id: 'qwen',
-    label: '通义千问 (百炼兼容模式)',
+    label: '通义千问',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     modelName: 'qwen-plus',
   },
@@ -54,13 +54,35 @@ const PROVIDER_PRESETS: Array<{
     id: 'deepseek',
     label: 'DeepSeek 官方',
     baseUrl: 'https://api.deepseek.com/v1',
-    modelName: 'deepseek-chat',
+    // 账号实际可用模型为 deepseek-v4 系列（推理模型）；deepseek-chat 是遗留别名
+    modelName: 'deepseek-v4-flash',
   },
   {
     id: 'selfhost',
-    label: '内网自建网关',
+    label: '通义千问（内网私有部署）',
     baseUrl: 'http://llm-gateway.corp.local/v1',
   },
+];
+
+/**
+ * 风控分类显示文案（短标签，用于筛选按钮与规则行徽章；未知自定义分类回退显示原始标识）
+ * 内置 5 类之外的分类可在新建/编辑规则弹窗中「＋ 新增分类…」自由扩展
+ */
+const CATEGORY_LABELS: Record<string, string> = {
+  security: '安全防御',
+  privacy: '隐私脱敏',
+  compliance: '内网合规',
+  stability: '运行稳定',
+  performance: '性能消耗',
+};
+
+/** 内置分类在弹窗下拉中的完整选项（含英文对照），其后会追加规则库中出现的自定义分类 */
+const CATEGORY_OPTIONS: Array<[string, string]> = [
+  ['security', '安全防御 (Security)'],
+  ['privacy', '隐私与数据脱敏 (Privacy)'],
+  ['compliance', '内网合规 (Compliance)'],
+  ['stability', '运行稳定性 (Stability)'],
+  ['performance', '性能与资源消耗 (Performance)'],
 ];
 
 interface RuleManagementViewProps {
@@ -94,7 +116,9 @@ export const RuleManagementView: React.FC<RuleManagementViewProps> = ({
   const [formName, setFormName] = useState('');
   const [formType, setFormType] = useState<RuleType>('regex');
   const [formSeverity, setFormSeverity] = useState<RuleSeverity>('high');
-  const [formCategory, setFormCategory] = useState<'security' | 'privacy' | 'compliance' | 'stability' | 'performance'>('security');
+  const [formCategory, setFormCategory] = useState<string>('security');
+  // 「＋ 新增分类…」开关：为 true 时弹窗内的分类下拉切换为文本输入，直接输入新分类标识
+  const [showNewCategory, setShowNewCategory] = useState(false);
   const [formDescription, setFormDescription] = useState('');
   const [formPattern, setFormPattern] = useState('');
   const [formLlmPrompt, setFormLlmPrompt] = useState('');
@@ -104,6 +128,10 @@ export const RuleManagementView: React.FC<RuleManagementViewProps> = ({
   const [ruleTestResult, setRuleTestResult] = useState<{ matched: boolean; summary: string } | null>(null);
 
   // DeepSeek Config Form State
+  /** 网关协议：'openai' 兼容 /chat/completions，或 'anthropic' Messages API */
+  const [dsProtocol, setDsProtocol] = useState<'openai' | 'anthropic'>(
+    deepseekConfig.protocol === 'anthropic' ? 'anthropic' : 'openai',
+  );
   const [dsBaseUrl, setDsBaseUrl] = useState(deepseekConfig.baseUrl);
   const [dsApiKey, setDsApiKey] = useState(deepseekConfig.apiKey);
   const [dsModelName, setDsModelName] = useState(deepseekConfig.modelName);
@@ -143,13 +171,8 @@ export async function handleUserQuery(input: string) {
 }`);
 
   const [sandboxRunning, setSandboxRunning] = useState(false);
-  const [sandboxReport, setSandboxReport] = useState<{
-    score: number;
-    status: 'passed' | 'warning' | 'failed';
-    regexHits: { ruleName: string; severity: RuleSeverity; matchedPattern: string; lineHint: string }[];
-    llmVerdict: { summary: string; reasoning: string[]; confidence: number };
-    durationMs: number;
-  } | null>(null);
+  // 直连后端 runSandboxScan 返回的真实结果（正则 + LLM 双引擎），只扫描不落库
+  const [sandboxReport, setSandboxReport] = useState<ApiSandboxScanResult | null>(null);
 
   // Filtered rules for current tab
   const filteredRules = rules.filter(r => {
@@ -173,6 +196,15 @@ export async function handleUserQuery(input: string) {
   const llmEnabledCount = rules.filter(r => r.type === 'llm' && r.isEnabled).length;
   const criticalCount = rules.filter(r => r.severity === 'critical' && r.isEnabled).length;
 
+  // 分类下拉可选项：内置 5 类 + 规则库中实际出现的自定义分类（让新分类立即可筛选、可再次选用）
+  const categoryOptions = useMemo(() => {
+    const knownKeys = new Set(CATEGORY_OPTIONS.map(([k]) => k));
+    const used = Array.from(new Set(rules.map(r => r.category)))
+      .filter(c => !!c && !knownKeys.has(c))
+      .map(c => [c, c] as [string, string]);
+    return [...CATEGORY_OPTIONS, ...used];
+  }, [rules]);
+
   const startCreate = (type: RuleType) => {
     setIsCreating(true);
     setEditingRule(null);
@@ -180,6 +212,7 @@ export async function handleUserQuery(input: string) {
     setFormName('');
     setFormSeverity('high');
     setFormCategory('security');
+    setShowNewCategory(false);
     setFormDescription('');
     setFormPattern(type === 'regex' ? '(?i)(?:forbidden_pattern)' : '');
     setFormLlmPrompt(type === 'llm' ? '分析此代码是否存在越权操作、隐藏后门或恶意外部网络调用...' : '');
@@ -193,6 +226,7 @@ export async function handleUserQuery(input: string) {
     setFormName(rule.name);
     setFormSeverity(rule.severity);
     setFormCategory(rule.category);
+    setShowNewCategory(false);
     setFormDescription(rule.description);
     setFormPattern(rule.pattern || '');
     setFormLlmPrompt(rule.llmPromptTemplate || '');
@@ -210,12 +244,17 @@ export async function handleUserQuery(input: string) {
       return;
     }
 
+    if (!formCategory.trim()) {
+      onToast('warning', '请填写风控分类', '请选择内置分类，或通过「＋ 新增分类…」输入新分类标识');
+      return;
+    }
+
     const ruleToSave: AuditRule = {
       id: editingRule ? editingRule.id : `rule-custom-${Date.now()}`,
       name: formName.trim(),
       type: formType,
       severity: formSeverity,
-      category: formCategory,
+      category: formCategory.trim(),
       description: formDescription.trim(),
       pattern: formType === 'regex' ? formPattern.trim() : undefined,
       llmPromptTemplate: formType === 'llm' ? formLlmPrompt.trim() : undefined,
@@ -266,6 +305,7 @@ export async function handleUserQuery(input: string) {
       .then((cfg) => {
         if (cancelled) return;
         setServerLlm(cfg);
+        setDsProtocol(cfg.protocol === 'anthropic' ? 'anthropic' : 'openai');
         setDsBaseUrl(cfg.baseUrl);
         setDsModelName(cfg.modelName);
         setDsTemperature(cfg.temperature);
@@ -276,6 +316,55 @@ export async function handleUserQuery(input: string) {
         setDsEnabled(cfg.isEnabled);
         // 已存有凭据时输入框留空表示"保持不变"，避免把掩码当成新 Key 覆盖回去
         setDsApiKey('');
+
+        // 同步真实网关配置到 App 级展示状态：顶部「大模型网关」徽章此前只在
+        // 手动点「保存」后才更新，导致已配置的网关仍显示"未配置 / 尚未自检"。
+        onSaveDeepSeekConfig({
+          ...deepseekConfig,
+          protocol: cfg.protocol,
+          baseUrl: cfg.baseUrl,
+          apiKey: cfg.apiKeyMask,
+          modelName: cfg.modelName,
+          temperature: cfg.temperature,
+          maxTokens: cfg.maxTokens,
+          systemPrompt: cfg.systemPrompt,
+          lastTestedAt: cfg.lastTestedAt || undefined,
+          testStatus: (cfg.testStatus as DeepSeekConfig['testStatus']) || 'untested',
+        });
+
+        // 已配置真实网关时，进页面自动发起一次真实连通性探测（等价于向模型
+        // 发送一句问候语），有返回即把徽章状态更新为「已连通」，无需手动点击测试。
+        if (cfg.hasApiKey && cfg.baseUrl && cfg.modelName) {
+          setIsTestingDs(true);
+          api
+            .testLlmConfig()
+            .then((r) => {
+              if (cancelled) return;
+              const newStatus: DeepSeekConfig['testStatus'] = r.success
+                ? 'success'
+                : 'failed';
+              setDsTestResult({
+                success: r.success,
+                latency: r.latencyMs,
+                message: r.success ? '网关连通成功' : '网关连通失败',
+                details: r.message,
+              });
+              setServerLlm((prev) =>
+                prev
+                  ? { ...prev, testStatus: newStatus, testMessage: r.message }
+                  : prev,
+              );
+              onSaveDeepSeekConfig({
+                ...deepseekConfig,
+                modelName: cfg.modelName,
+                testStatus: newStatus,
+              });
+            })
+            .catch(() => {})
+            .finally(() => {
+              if (!cancelled) setIsTestingDs(false);
+            });
+        }
       })
       .catch(() => {
         if (!cancelled) setServerLlm(null);
@@ -301,6 +390,7 @@ export async function handleUserQuery(input: string) {
     try {
       // 先把当前表单落库（apiKey 留空则后端保持原凭据不变），再由后端发起真实探测
       const saved = await api.updateLlmConfig({
+        protocol: dsProtocol,
         baseUrl: dsBaseUrl.trim(),
         apiKey: dsApiKey.trim() || undefined,
         modelName: dsModelName.trim(),
@@ -324,8 +414,14 @@ export async function handleUserQuery(input: string) {
       } else {
         onToast('error', '网关连接失败', result.message);
       }
-      // 回读最新自检状态
-      setServerLlm(await api.getLlmConfig());
+      // 回读最新自检状态，并同步到 App 级徽章展示（已连通 / 连接失败）
+      const refreshed = await api.getLlmConfig();
+      setServerLlm(refreshed);
+      onSaveDeepSeekConfig({
+        ...deepseekConfig,
+        modelName: refreshed.modelName,
+        testStatus: (refreshed.testStatus as DeepSeekConfig['testStatus']) || 'untested',
+      });
     } catch (err: any) {
       setDsTestResult({
         success: false,
@@ -352,6 +448,7 @@ export async function handleUserQuery(input: string) {
     setIsSavingDs(true);
     try {
       const saved = await api.updateLlmConfig({
+        protocol: dsProtocol,
         baseUrl: dsBaseUrl.trim() || 'https://api.deepseek.com/v1',
         apiKey: dsApiKey.trim() || undefined,
         modelName: dsModelName.trim() || 'deepseek-chat',
@@ -369,6 +466,7 @@ export async function handleUserQuery(input: string) {
       // 同步前端本地展示配置（模型名用于界面标注驱动引擎）
       onSaveDeepSeekConfig({
         ...deepseekConfig,
+        protocol: saved.protocol,
         baseUrl: saved.baseUrl,
         apiKey: saved.apiKeyMask,
         modelName: saved.modelName,
@@ -393,92 +491,33 @@ export async function handleUserQuery(input: string) {
     }
   };
 
-  // Interactive Live Dual-Engine Sandbox Runner
+  /**
+   * 交互式双引擎沙箱体检：直连后端 POST /api/v1/audit/sandbox-scan。
+   * 由服务端跑「真实正则规则引擎 + 真实 LLM 语义引擎」并返回综合评分，
+   * 只扫描不落库 —— 与审核工作台共用同一套引擎，保证这里看到的结果
+   * 与真正审核该技能时完全一致，而不是本地关键字模拟。
+   */
   const handleRunFullSandbox = async () => {
+    if (!sandboxCode.trim()) {
+      onToast('warning', '缺少检测内容', '请先粘贴待检测的代码或 Prompt 再触发体检');
+      return;
+    }
     setSandboxRunning(true);
     setSandboxReport(null);
-
-    const startTime = Date.now();
-    await new Promise(r => setTimeout(r, 850));
-
-    // 1. Run Regex against code
-    const regexHits: { ruleName: string; severity: RuleSeverity; matchedPattern: string; lineHint: string }[] = [];
-    const activeRegexRules = rules.filter(r => r.type === 'regex' && r.isEnabled);
-
-    activeRegexRules.forEach(rule => {
-      if (!rule.pattern) return;
-      try {
-        const reg = new RegExp(rule.pattern, 'gim');
-        if (reg.test(sandboxCode)) {
-          regexHits.push({
-            ruleName: rule.name,
-            severity: rule.severity,
-            matchedPattern: rule.pattern,
-            lineHint: rule.name.includes('Token') ? '发现硬编码密钥模式' : '检测到危险代码执行/外连'
-          });
-        }
-      } catch (e) {}
-    });
-
-    // 2. Simulate DeepSeek semantic reasoning
-    const hasEval = sandboxCode.includes('eval') || sandboxCode.includes('exec');
-    const hasSecret = sandboxCode.includes('sk-') || sandboxCode.includes('password') || sandboxCode.includes('token');
-    const hasNetwork = sandboxCode.includes('fetch(') || sandboxCode.includes('http');
-    const hasFileLeak = sandboxCode.includes('/etc/shadow') || sandboxCode.includes('readFileSync');
-
-    let score = 100;
-    const reasoning: string[] = [];
-
-    if (regexHits.length > 0) {
-      score -= regexHits.length * 20;
+    try {
+      const result = await api.runSandboxScan(sandboxCode);
+      setSandboxReport(result);
+      onToast(
+        result.status === 'passed' ? 'success' : result.status === 'warning' ? 'warning' : 'error',
+        '沙箱体检完成',
+        `综合安全评分 ${result.score} 分，命中 ${result.regexHits.length} 项正则特征；` +
+          `LLM 引擎: ${result.llmVerdict.engine === 'llm' ? result.llmVerdict.model : '本地启发式降级'}`
+      );
+    } catch (err: any) {
+      onToast('error', '沙箱扫描失败', err?.message || '无法连接 SkillHub 后端');
+    } finally {
+      setSandboxRunning(false);
     }
-    if (hasEval) {
-      reasoning.push(`[代码注入风险] 检测到动态代码执行语法 (eval/exec)，存在任意命令执行风险。`);
-      score -= 30;
-    }
-    if (hasSecret) {
-      reasoning.push(`[敏感信息泄露] 存在硬编码的私有 API Token 签名特征。`);
-      score -= 20;
-    }
-    if (hasFileLeak) {
-      reasoning.push(`[越权文件访问] 尝试读取操作系统敏感目录 (/etc/shadow)，违反沙箱隔离规范。`);
-      score -= 35;
-    }
-    if (hasNetwork) {
-      reasoning.push(`[非可信外部网络请求] 检测到向未在白名单的第三方服务器回传数据的逻辑。`);
-      score -= 15;
-    }
-
-    if (reasoning.length === 0) {
-      reasoning.push('未检测到明显的高危特征或违规行为，代码符合最小特权与安全编码原则。');
-    }
-
-    score = Math.max(0, Math.min(100, score));
-    const status = score >= 90 ? 'passed' : score >= 60 ? 'warning' : 'failed';
-
-    const durationMs = Date.now() - startTime;
-
-    setSandboxReport({
-      score,
-      status,
-      regexHits,
-      llmVerdict: {
-        summary: status === 'passed'
-          ? '双引擎综合评估通过，未发现高危代码注入或越权访问风险。'
-          : `双引擎发现 ${regexHits.length} 项正则特征命中与 ${reasoning.length} 项语义安全告警。`,
-        reasoning,
-        // 本地启发式置信度：命中越多置信度越高；真实 LLM 判定时该值由服务端覆盖
-        confidence: Math.min(0.95, 0.6 + regexHits.length * 0.05 + reasoning.length * 0.05)
-      },
-      durationMs
-    });
-
-    setSandboxRunning(false);
-    onToast(
-      status === 'passed' ? 'success' : status === 'warning' ? 'warning' : 'error',
-      '沙箱实测完成',
-      `综合安全评分: ${score} 分 (${durationMs}ms)`
-    );
   };
 
 
@@ -503,9 +542,9 @@ export async function handleUserQuery(input: string) {
             </p>
           </div>
 
-          {/* Operational Status Metrics */}
-          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-            <div className="p-3.5 rounded-2xl bg-indigo-50/80 border border-indigo-100 min-w-[120px]">
+          {/* Operational Status Metrics（4 卡等高：容器 items-stretch，卡片 flex-col 垂直居中） */}
+          <div className="flex items-stretch gap-3 flex-wrap sm:flex-nowrap">
+            <div className="p-3.5 rounded-2xl bg-indigo-50/80 border border-indigo-100 min-w-[120px] flex flex-col justify-center">
               <div className="flex items-center justify-between text-indigo-700 text-[11px] font-semibold">
                 <span>正则特征库</span>
                 <Terminal className="w-3.5 h-3.5" />
@@ -515,7 +554,7 @@ export async function handleUserQuery(input: string) {
               </div>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-purple-50/80 border border-purple-100 min-w-[120px]">
+            <div className="p-3.5 rounded-2xl bg-purple-50/80 border border-purple-100 min-w-[120px] flex flex-col justify-center">
               <div className="flex items-center justify-between text-purple-700 text-[11px] font-semibold">
                 <span>LLM 语义规则</span>
                 <Bot className="w-3.5 h-3.5" />
@@ -525,7 +564,7 @@ export async function handleUserQuery(input: string) {
               </div>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-100 min-w-[140px]">
+            <div className="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-100 min-w-[140px] flex flex-col justify-center">
               <div className="flex items-center justify-between text-emerald-700 text-[11px] font-semibold">
                 <span>大模型网关</span>
                 <span className={`w-2 h-2 rounded-full ${deepseekConfig.testStatus === 'success' ? 'bg-emerald-500' : deepseekConfig.testStatus === 'failed' ? 'bg-rose-500' : 'bg-slate-400'}`} />
@@ -534,15 +573,21 @@ export async function handleUserQuery(input: string) {
                 {deepseekConfig.modelName || '未配置'}
               </div>
               <div className="text-[10px] text-emerald-700 font-mono">
-                {deepseekConfig.testStatus === 'success'
-                  ? '✅ 连通性自检通过'
-                  : deepseekConfig.testStatus === 'failed'
-                    ? '⚠️ 上次自检失败'
-                    : '尚未自检'}
+                {isTestingDs
+                  ? '⏳ 正在探测...'
+                  : deepseekConfig.testStatus === 'success'
+                    ? '✅ 已连通'
+                    : deepseekConfig.testStatus === 'failed'
+                      ? '⚠️ 连接失败'
+                      : !serverLlm
+                        ? '检测中...'
+                        : serverLlm.hasApiKey
+                          ? '待探测'
+                          : '未配置网关'}
               </div>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-rose-50/80 border border-rose-100 min-w-[110px]">
+            <div className="p-3.5 rounded-2xl bg-rose-50/80 border border-rose-100 min-w-[110px] flex flex-col justify-center">
               <div className="flex items-center justify-between text-rose-700 text-[11px] font-semibold">
                 <span>致命一票否决</span>
                 <ShieldAlert className="w-3.5 h-3.5" />
@@ -591,9 +636,6 @@ export async function handleUserQuery(input: string) {
             >
               <Cpu className="w-4 h-4" />
               <span>大模型网关与模型调度</span>
-              <span className="px-1.5 py-0.5 rounded-full bg-white/20 text-[10px] font-mono">
-                核心驱动
-              </span>
             </button>
 
             <button
@@ -688,33 +730,63 @@ export async function handleUserQuery(input: string) {
                       <label className="block text-xs font-bold text-slate-800 mb-1">
                         严重级别 (Severity)
                       </label>
-                      <select
+                      <Select
+                        size="md"
                         value={formSeverity}
                         onChange={e => setFormSeverity(e.target.value as RuleSeverity)}
-                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 text-xs outline-none"
                       >
                         <option value="critical">Critical 致命 (一票否决/强制拦截)</option>
                         <option value="high">High 高危</option>
                         <option value="medium">Medium 中等 (产生警告)</option>
                         <option value="low">Low 提示 (仅记录)</option>
-                      </select>
+                      </Select>
                     </div>
 
                     <div>
                       <label className="block text-xs font-bold text-slate-800 mb-1">
                         风控分类 (Category)
                       </label>
-                      <select
-                        value={formCategory}
-                        onChange={e => setFormCategory(e.target.value as any)}
-                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 text-xs outline-none"
+                      <Select
+                        size="md"
+                        value={showNewCategory ? '__new__' : formCategory}
+                        onChange={e => {
+                          if (e.target.value === '__new__') {
+                            // 进入「新增分类」输入态：清空表单分类，等待用户输入新标识
+                            setShowNewCategory(true);
+                            setFormCategory('');
+                          } else {
+                            setShowNewCategory(false);
+                            setFormCategory(e.target.value);
+                          }
+                        }}
                       >
-                        <option value="security">安全防御 (Security)</option>
-                        <option value="privacy">隐私与数据脱敏 (Privacy)</option>
-                        <option value="compliance">内网合规 (Compliance)</option>
-                        <option value="stability">运行稳定性 (Stability)</option>
-                        <option value="performance">性能与资源消耗 (Performance)</option>
-                      </select>
+                        {categoryOptions.map(([key, label]) => (
+                          <option key={key} value={key}>{label}</option>
+                        ))}
+                        <option value="__new__">＋ 新增分类…</option>
+                      </Select>
+                      {showNewCategory && (
+                        <div className="mt-2">
+                          <input
+                            autoFocus
+                            type="text"
+                            value={formCategory}
+                            onChange={e => setFormCategory(e.target.value)}
+                            placeholder="输入新分类标识，如 network-security（支持中英文）"
+                            className="w-full px-3.5 py-2.5 rounded-xl border border-indigo-300 bg-indigo-50/40 text-slate-900 text-xs outline-none focus:ring-2 focus:ring-indigo-200"
+                          />
+                          <div className="mt-1.5 flex items-center justify-between gap-2">
+                            <span className="text-[10px] text-slate-500">保存后该分类将出现在筛选与下拉选项中</span>
+                            <button
+                              type="button"
+                              onClick={() => { setShowNewCategory(false); setFormCategory('security'); }}
+                              className="text-[11px] font-semibold text-slate-500 hover:text-slate-700 shrink-0"
+                            >
+                              取消
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -820,7 +892,7 @@ export async function handleUserQuery(input: string) {
                 <Filter className="w-3.5 h-3.5" />
                 <span>分类筛选:</span>
               </span>
-              {['all', 'security', 'privacy', 'compliance', 'stability'].map((cat) => (
+              {['all', ...categoryOptions.map(([key]) => key)].map((cat) => (
                 <button
                   key={cat}
                   onClick={() => setCategoryFilter(cat)}
@@ -830,10 +902,7 @@ export async function handleUserQuery(input: string) {
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  {cat === 'all' ? '全部分类' :
-                   cat === 'security' ? '安全防御' :
-                   cat === 'privacy' ? '隐私脱敏' :
-                   cat === 'compliance' ? '内网合规' : '运行稳定'}
+                  {cat === 'all' ? '全部分类' : (CATEGORY_LABELS[cat] || cat)}
                 </button>
               ))}
             </div>
@@ -884,7 +953,7 @@ export async function handleUserQuery(input: string) {
                         </span>
 
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">
-                          {rule.category}
+                          {CATEGORY_LABELS[rule.category] || rule.category}
                         </span>
 
                         {rule.isPreset && (
@@ -994,9 +1063,36 @@ export async function handleUserQuery(input: string) {
 
             <div className="space-y-4 text-xs">
               <div>
-                <label className="block font-bold text-slate-800 mb-1 flex items-center justify-between">
-                  <span>API Base URL (端点接入地址)</span>
-                  <span className="text-slate-400 font-normal">OpenAI 兼容协议，支持内部网关</span>
+                <label className="block font-bold text-slate-800 mb-2">网关协议</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDsProtocol('openai')}
+                    className={`px-3 py-2 rounded-xl border text-xs font-bold transition-colors ${
+                      dsProtocol === 'openai'
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                        : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    OpenAI 兼容协议
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDsProtocol('anthropic')}
+                    className={`px-3 py-2 rounded-xl border text-xs font-bold transition-colors ${
+                      dsProtocol === 'anthropic'
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                        : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    Anthropic 协议
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-800 mb-1">
+                  API Base URL (端点接入地址)
                 </label>
                 <div className="relative">
                   <Globe className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
@@ -1004,7 +1100,7 @@ export async function handleUserQuery(input: string) {
                     type="text"
                     value={dsBaseUrl}
                     onChange={e => setDsBaseUrl(e.target.value)}
-                    placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+                    placeholder={dsProtocol === 'anthropic' ? 'https://api.deepseek.com/anthropic' : 'https://api.deepseek.com/v1'}
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 font-mono bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
                   />
                 </div>
@@ -1121,10 +1217,11 @@ export async function handleUserQuery(input: string) {
                   <label className="block font-bold text-slate-800 mb-1">
                     模型名称 (Model Identifier)
                   </label>
-                  <select
+                  <Select
+                    size="md"
                     value={dsModelName}
                     onChange={e => setDsModelName(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 font-mono outline-none"
+                    className="font-mono"
                   >
                     <optgroup label="通义千问 (qwen 系列)">
                       <option value="qwen-plus">qwen-plus (千问通用旗舰)</option>
@@ -1139,10 +1236,7 @@ export async function handleUserQuery(input: string) {
                     <optgroup label="其他">
                       <option value="custom-gateway">自定义内网网关模型</option>
                     </optgroup>
-                  </select>
-                  <p className="mt-1 text-[11px] text-slate-400">
-                    网关基址需与模型所属厂商匹配：千问走百炼兼容模式，DeepSeek 走官方或内网网关。
-                  </p>
+                  </Select>
                 </div>
 
                 <div>
@@ -1235,20 +1329,12 @@ export async function handleUserQuery(input: string) {
               ) : (
                 <div className="p-6 text-center rounded-2xl bg-slate-50 border border-slate-200 text-slate-400 text-xs space-y-2">
                   <Server className="w-8 h-8 mx-auto text-slate-300" />
-                  <p>点击「测试网关连通性」发起实时心跳握手</p>
+                  <p>{isTestingDs ? '正在自动探测网关连通性...' : '未配置网关：填写基址与 API Key 后保存并测试'}</p>
                 </div>
               )}
 
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5 text-xs text-slate-600">
-                <h5 className="font-bold text-slate-900 flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>企业内网大模型网关安全原则</span>
-                </h5>
-                <ul className="space-y-1.5 text-[11px] list-disc list-inside">
-                  <li>API Key 仅存放于服务器进程安全配置中，前端不暴露明文。</li>
-                  <li>所有代码与 Prompt 体检数据在离开内网前自动经过正则数据脱敏。</li>
-                  <li>支持一键平滑热切换至企业私有部署的 DeepSeek-R1 / vLLM 集群。</li>
-                </ul>
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600">
+                网关 API Key 仅存于服务端数据库，前端只显示掩码；语义体检数据按需发送至所配置的网关模型。
               </div>
             </div>
           </div>
@@ -1425,17 +1511,29 @@ export function formatSql(query: string): string {
                     )}
                   </div>
 
-                  {/* DeepSeek LLM Engine Section */}
+                  {/* LLM 语义引擎 Section：模型名 / 降级状态来自服务端真实判定 */}
                   <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
                     <div className="flex items-center justify-between text-xs font-bold text-slate-800">
                       <span className="flex items-center gap-1.5">
                         <Bot className="w-3.5 h-3.5 text-purple-600" />
-                        <span>引擎 2: DeepSeek-V3 语义推理判定</span>
+                        <span>
+                          引擎 2: LLM 语义推理判定 (
+                          {sandboxReport.llmVerdict.engine === 'llm'
+                            ? sandboxReport.llmVerdict.model
+                            : '本地启发式降级'}
+                          )
+                        </span>
                       </span>
                       <span className="text-[10px] text-purple-600 font-mono font-normal">
                         置信度: {(sandboxReport.llmVerdict.confidence * 100).toFixed(0)}%
                       </span>
                     </div>
+
+                    {sandboxReport.llmVerdict.engine === 'heuristic' && sandboxReport.llmVerdict.degradedReason && (
+                      <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                        ⚠️ {sandboxReport.llmVerdict.degradedReason}
+                      </p>
+                    )}
 
                     <ul className="space-y-1.5 text-xs text-slate-700">
                       {sandboxReport.llmVerdict.reasoning.map((r, i) => (

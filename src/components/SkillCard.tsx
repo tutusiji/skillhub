@@ -116,13 +116,13 @@ export const SkillCard: React.FC<SkillCardProps> = ({
           {isApproved && (
             <div className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>{skill.auditResults.score}分 · 通过</span>
+              <span>{skill.auditResults.score != null ? `${skill.auditResults.score}分` : '未体检'} · 通过</span>
             </div>
           )}
           {isPending && (
             <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>待审 ({skill.auditResults.score}分)</span>
+              <span>{skill.auditResults.score != null ? `待审 (${skill.auditResults.score}分)` : '待审 (未体检)'}</span>
             </div>
           )}
           {isRejected && (

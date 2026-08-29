@@ -32,6 +32,13 @@ interface ModalProps {
    *   - 'top'    顶部对齐（适合大型表单/长内容，可滚动）
    */
   align?: 'center' | 'top';
+  /**
+   * 层叠层级（z-index，默认 50）。
+   * 多层弹窗叠放（如版本记录弹窗之上再叠预览弹窗）时，上层弹窗要盖住下层，
+   * 需要显式传一个更大的值 —— 所有 Modal 默认同层 z-50，仅按 DOM 顺序排层，
+   * 后渲染的弹窗反而盖住先渲染的，层级无法保证。
+   */
+  zIndex?: number;
 }
 
 const SIZE_CLASS: Record<ModalSize, string> = {
@@ -50,6 +57,15 @@ const SIZE_CLASS: Record<ModalSize, string> = {
 const ANIM_DURATION_MS = 200;
 
 /**
+ * 弹窗栈：记录当前「已打开」的弹窗 id（按打开顺序）。
+ * 多层弹窗叠放时（如预览弹窗叠在版本记录弹窗上），只有最顶层弹窗
+ * 响应 ESC / 背景点击关闭，下层弹窗保持 inert —— 否则按一次 ESC 会
+ * 同时关掉上下两层，点背景也会连关两层。
+ */
+const modalStack: number[] = [];
+let modalSeq = 0;
+
+/**
  * 通用弹窗组件 —— 统一的进入 / 退场动画 + 滚动锁定 + ESC/背景点击关闭
  *
  * 实现要点：
@@ -57,6 +73,7 @@ const ANIM_DURATION_MS = 200;
  *    改用「可见状态」visible 控制过渡类，等动画结束再真正卸载。
  *  - 用 transition-* 类（不是 animate-in），这样同一套类同时管进入和退场。
  *  - 打开时锁定 body 滚动，关闭后还原。
+ *  - 层级：默认 z-50；叠放时上层弹窗通过 zIndex 提级，且仅最顶层响应关闭。
  */
 export const Modal: React.FC<ModalProps> = ({
   isOpen,
@@ -71,6 +88,7 @@ export const Modal: React.FC<ModalProps> = ({
   footer,
   children,
   align = 'center',
+  zIndex,
 }) => {
   // 真正的挂载状态：用于延后卸载，保证退场动画播完
   const [mounted, setMounted] = useState(isOpen);
@@ -79,16 +97,26 @@ export const Modal: React.FC<ModalProps> = ({
   // 防止连续点击在动画期间误触关闭
   const closeGuardRef = useRef(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  // 弹窗栈 id：每个实例一个稳定自增 id，用于判定「是否最顶层」
+  const stackIdRef = useRef(0);
+  if (stackIdRef.current === 0) {
+    stackIdRef.current = ++modalSeq;
+  }
 
-  // 进入 / 退场：保持挂载直到退场动画结束
+  // 进入 / 退场：保持挂载直到退场动画结束；打开入栈、关闭出栈
   useEffect(() => {
     if (isOpen) {
+      modalStack.push(stackIdRef.current);
       setMounted(true);
       // 下一帧再设 visible=true，触发 transition
       const raf = requestAnimationFrame(() => {
         requestAnimationFrame(() => setVisible(true));
       });
-      return () => cancelAnimationFrame(raf);
+      return () => {
+        cancelAnimationFrame(raf);
+        const idx = modalStack.indexOf(stackIdRef.current);
+        if (idx >= 0) modalStack.splice(idx, 1);
+      };
     } else {
       setVisible(false);
       const t = setTimeout(() => setMounted(false), ANIM_DURATION_MS);
@@ -117,13 +145,14 @@ export const Modal: React.FC<ModalProps> = ({
   useEffect(() => {
     if (!mounted || !closeOnEscape) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        if (closeGuardRef.current) return;
-        closeGuardRef.current = true;
-        onClose();
-        setTimeout(() => { closeGuardRef.current = false; }, ANIM_DURATION_MS);
-      }
+      if (e.key !== 'Escape') return;
+      // 仅最顶层弹窗响应 ESC：下层弹窗（如被预览盖住的版本记录）保持打开
+      if (modalStack[modalStack.length - 1] !== stackIdRef.current) return;
+      e.stopPropagation();
+      if (closeGuardRef.current) return;
+      closeGuardRef.current = true;
+      onClose();
+      setTimeout(() => { closeGuardRef.current = false; }, ANIM_DURATION_MS);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -145,6 +174,8 @@ export const Modal: React.FC<ModalProps> = ({
 
   const handleBackdropClick = useCallback(() => {
     if (!closeOnBackdrop) return;
+    // 仅最顶层弹窗响应背景点击：预览叠在版本记录上时，点背景只关预览
+    if (modalStack[modalStack.length - 1] !== stackIdRef.current) return;
     if (closeGuardRef.current) return;
     closeGuardRef.current = true;
     onClose();
@@ -162,8 +193,8 @@ export const Modal: React.FC<ModalProps> = ({
     <div
       role="dialog"
       aria-modal="true"
-      className={`fixed inset-0 z-50 flex p-4 sm:p-6 ${alignClass} ${containerClassName ?? ''}`}
-      style={{ overflow: align === 'top' ? 'auto' : 'hidden' }}
+      className={`fixed inset-0 flex p-4 sm:p-6 ${alignClass} ${containerClassName ?? ''}`}
+      style={{ zIndex: zIndex ?? 50, overflow: align === 'top' ? 'auto' : 'hidden' }}
     >
       {/* Backdrop */}
       <div

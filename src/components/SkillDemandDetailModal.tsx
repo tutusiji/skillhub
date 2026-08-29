@@ -25,6 +25,7 @@ import { useExpertDomains } from '../hooks/useExpertDomains';
 import { PopconfirmBubble } from './PopconfirmBubble';
 import { Modal } from './Modal';
 import { Avatar } from './Avatar';
+import { Select } from './Select';
 
 interface SkillDemandDetailModalProps {
   demand: SkillDemand | null;
@@ -286,10 +287,10 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
                 <label className="block text-[11px] text-slate-600 mb-1">
                   关联我已发布的技能 (选填)
                 </label>
-                <select
+                <Select
+                  size="md"
                   value={selectedSkillId}
                   onChange={e => setSelectedSkillId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs text-slate-800"
                 >
                   <option value="">-- 选择现有技能或稍后上传 --</option>
                   {availableSkills.map(s => (
@@ -297,7 +298,7 @@ export const SkillDemandDetailModal: React.FC<SkillDemandDetailModalProps> = ({
                       {s.name} ({s.version})
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
               <div>
                 <label className="block text-[11px] text-slate-600 mb-1">

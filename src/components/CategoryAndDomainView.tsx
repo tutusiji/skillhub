@@ -21,6 +21,7 @@ import { useExpertDomains } from '../hooks/useExpertDomains';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { PopconfirmBubble } from './PopconfirmBubble';
 import { Avatar } from './Avatar';
+import { Select } from './Select';
 
 interface CategoryAndDomainViewProps {
   currentUser: UserAccount;
@@ -734,32 +735,33 @@ export const CategoryAndDomainView: React.FC<CategoryAndDomainViewProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-800 mb-1">图标</label>
-                  <select
+                  <Select
+                    size="md"
                     value={form.iconName}
                     onChange={e => setForm({ ...form, iconName: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-900 font-mono outline-none"
+                    className="font-mono"
                   >
                     {ICON_OPTIONS.map(icon => (
                       <option key={icon} value={icon}>{icon}</option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
                 <div>
                   <label className="block font-bold text-slate-800 mb-1">徽章配色</label>
-                  <select
+                  <Select
+                    size="md"
                     value={`${form.badgeBg}|${form.badgeText}|${form.badgeBorder}`}
                     onChange={e => {
                       const [bg, text, border] = e.target.value.split('|');
                       setForm({ ...form, badgeBg: bg, badgeText: text, badgeBorder: border });
                     }}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-900 outline-none"
                   >
                     {BADGE_THEMES.map(t => (
                       <option key={t.label} value={`${t.badgeBg}|${t.badgeText}|${t.badgeBorder}`}>
                         {t.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
