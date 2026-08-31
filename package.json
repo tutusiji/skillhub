@@ -14,7 +14,10 @@
     "server:start": "pnpm --filter skillhub-server run start:prod",
     "test:regression": "node scripts/regression-test.mjs",
     "test:plugin-e2e": "bash scripts/claude-plugin-e2e.sh",
-    "test:all": "pnpm run lint && pnpm run test:regression && pnpm run test:plugin-e2e"
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:all": "pnpm run lint && pnpm run test:unit && pnpm run test:regression && pnpm run test:plugin-e2e && pnpm run test:e2e"
   },
   "dependencies": {
     "@radix-ui/react-select": "^2.3.7",
@@ -29,18 +32,25 @@
     "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.6",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
+    "jsdom": "^30.0.1",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "vitest": "^4.1.11"
   }
 }

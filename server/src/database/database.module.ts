@@ -1,6 +1,7 @@
 import { Module, Global } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { isProduction } from '../common/runtime-env';
 import { UserEntity } from './entities/user.entity';
 import { SkillEntity } from './entities/skill.entity';
 import { AuditRuleEntity } from './entities/audit-rule.entity';
@@ -43,7 +44,10 @@ import { ExpertDomainEntity } from './entities/expert-domain.entity';
           password: configService.get<string>('DB_PASSWORD', 'postgres'),
           database: configService.get<string>('DB_NAME', 'skillhub'),
           entities,
-          synchronize: true, // 自动同步表结构
+          // 自动同步表结构仅限非生产：生产每次重启都按实体比对并 ALTER 表，
+          // 一旦实体改了列名/类型就可能直接 DROP 列丢数据。生产首次建表
+          // 用 APP_ENV=dev 启动一次，之后常驻 prod 即保持只读 schema。
+          synchronize: !isProduction(),
           logging: false,
         };
       },

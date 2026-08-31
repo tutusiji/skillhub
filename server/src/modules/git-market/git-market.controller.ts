@@ -1,16 +1,6 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Req,
-  Res,
-  Query,
-  Headers,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Controller, Get, Post, Req, Res, Query } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { GitMarketService } from './git-market.service';
-import { AuthService } from '../auth/auth.service';
 import { spawn } from 'child_process';
 
 /**
@@ -19,10 +9,7 @@ import { spawn } from 'child_process';
  */
 @Controller()
 export class GitMarketController {
-  constructor(
-    private readonly gitMarketService: GitMarketService,
-    private readonly authService: AuthService,
-  ) {}
+  constructor(private readonly gitMarketService: GitMarketService) {}
 
   /**
    * 处理 Git 客户端引用协商请求 (info/refs)
@@ -42,11 +29,10 @@ export class GitMarketController {
       return res.status(400).send('Only git-upload-pack is supported for marketplace');
     }
 
-    // 校验 Token / 白名单权限
-    const token = (req.query.token as string) || (req.headers['authorization'] as string);
-    if (token && !this.authService.validateToken(token.replace('Bearer ', ''))) {
-      throw new UnauthorizedException('企业访问令牌已失效');
-    }
+    // 内网部署策略：Git 市场仓库对全内网公开只读（已上架技能本就对所有登录用户可见，
+    // 匿名 git 拉取与之等价）。Claude Code /plugin marketplace add 免 token 直接拉取。
+    // 若未来需要限制拉取范围，应在入口层（frp / Nginx / 内网网关）控制，而非给
+    // Git Smart HTTP 协议端点加鉴权（那会破坏免配置安装）。
 
     res.setHeader('Content-Type', `application/x-${service}-advertisement`);
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');

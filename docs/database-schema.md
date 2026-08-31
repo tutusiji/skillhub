@@ -3,7 +3,7 @@
 SkillHub 后端使用 **TypeORM** 做对象关系映射，数据库统一使用 **PostgreSQL**（SQLite 支持已移除），
 连接由 `server/.env` 的 `DB_*` 变量或 `DATABASE_URL` 控制。
 
-`synchronize: true` 当前对两种模式都开启，即启动时按实体自动建表/改表。**生产环境改实体定义前请先备份**。
+`synchronize` 按环境门控（`!isProduction()`）：开发/测试启动时按实体自动建表/改表；**生产环境关闭自动改表**，首次建表先用 `APP_ENV=dev` 启动一次，之后常驻 prod。生产改实体后需手动迁移或临时用 dev 同步。
 
 ---
 
@@ -197,5 +197,5 @@ SkillHub 后端使用 **TypeORM** 做对象关系映射，数据库统一使用 
 
 - 连接参数见 `server/.env`（`DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME`，
   或 `DATABASE_URL` 一次性指定，优先级更高）。
-- `synchronize: true` 会在启动时按实体自动建表/改表，**生产环境的表结构变更请先备份**。
+- `synchronize` 非生产开启（按实体自动建表/改表），**生产关闭**；生产首次建表用 `APP_ENV=dev` 启动一次，此后改实体需手动迁移。
 - `simple-json` 列在 PostgreSQL 中落为 JSON 文本（不是 JSONB 列）。

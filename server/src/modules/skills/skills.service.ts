@@ -6,7 +6,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, Not, IsNull } from 'typeorm';
+import { Repository, DataSource, Like, Not, IsNull } from 'typeorm';
 import { SkillEntity } from '../../database/entities/skill.entity';
 import {
   GitMarketService,
@@ -94,6 +94,7 @@ export class SkillsService implements OnModuleInit {
   constructor(
     @InjectRepository(SkillEntity)
     private readonly skillRepository: Repository<SkillEntity>,
+    private readonly dataSource: DataSource,
     private readonly gitMarketService: GitMarketService,
     private readonly auditService: AuditService,
   ) {}
@@ -747,37 +748,41 @@ export class SkillsService implements OnModuleInit {
       );
     }
 
-    skill.status = 'approved';
-    skill.reviewedBy = reviewer || '系统管理员';
-    skill.reviewedAt = new Date().toISOString();
-    skill.adminFeedback = feedback || '审核通过，准予在内网市场公开。';
+    // 事务保证：新版本置 approved 与 replace 模式归档父版本同时成功或同时回滚，
+    // 避免「新版已上架、父版仍是 approved」导致版本链上同时存在两个当前版本。
+    await this.dataSource.transaction(async (manager) => {
+      skill.status = 'approved';
+      skill.reviewedBy = reviewer || '系统管理员';
+      skill.reviewedAt = new Date().toISOString();
+      skill.adminFeedback = feedback || '审核通过，准予在内网市场公开。';
+      await manager.save(skill);
 
-    const updated = await this.skillRepository.save(skill);
-
-    // 'replace' 模式：把父版本 archive 掉，记录 supersede 关系
-    // 注意：counter 已在新版 create 时从父版本继承（Phase 3），此处不再累加
-    if (updated.parentSkillId && updated.supersedeMode === 'replace') {
-      await this.skillRepository
-        .createQueryBuilder()
-        .update(SkillEntity)
-        .set({
-          status: 'archived',
-          archivedAt: new Date().toISOString(),
-          supersededById: updated.id,
-        })
-        .where('id = :id', { id: updated.parentSkillId })
-        .andWhere("status != 'archived'")
-        .execute();
-    }
+      // 'replace' 模式：把父版本 archive 掉，记录 supersede 关系
+      // 注意：counter 已在新版 create 时从父版本继承（Phase 3），此处不再累加
+      if (skill.parentSkillId && skill.supersedeMode === 'replace') {
+        await manager
+          .createQueryBuilder()
+          .update(SkillEntity)
+          .set({
+            status: 'archived',
+            archivedAt: new Date().toISOString(),
+            supersededById: skill.id,
+          })
+          .where('id = :id', { id: skill.parentSkillId })
+          .andWhere("status != 'archived'")
+          .execute();
+      }
+    });
 
     // 用用户上传的原始 ZIP 写入 Git 市场，确保安装到的是真实技能内容而非模板空壳
     // 即使 coexist 模式，git 仓也只保留最新版；旧版可通过 /skills/:id/zip 直接下载
+    // （git 同步是外部副作用，留在事务成功之后执行）
     await this.gitMarketService.syncApprovedSkillToGit(
-      updated,
-      this.zipBufferOf(updated),
-      updated.version,
+      skill,
+      this.zipBufferOf(skill),
+      skill.version,
     );
-    return this.stripZipBlob(updated);
+    return this.stripZipBlob(skill);
   }
 
   /**
@@ -948,20 +953,24 @@ export class SkillsService implements OnModuleInit {
       throw new NotFoundException('未找到对应技能');
     }
 
-    // 子版本重挂到被删节点的父节点，保持版本链完整（根仍唯一）
-    const children = await this.skillRepository.find({
-      where: { parentSkillId: id },
-    });
-    if (children.length > 0) {
-      await this.skillRepository
-        .createQueryBuilder()
-        .update(SkillEntity)
-        .set({ parentSkillId: skill.parentSkillId })
-        .where('parent_skill_id = :id', { id })
-        .execute();
-    }
+    // 事务保证：子版本重挂与删除主体同时成功或同时回滚，
+    // 避免「节点已删、子版本还指着不存在的父节点」导致版本链断根。
+    await this.dataSource.transaction(async (manager) => {
+      // 子版本重挂到被删节点的父节点，保持版本链完整（根仍唯一）
+      const children = await manager.find(SkillEntity, {
+        where: { parentSkillId: id },
+      });
+      if (children.length > 0) {
+        await manager
+          .createQueryBuilder()
+          .update(SkillEntity)
+          .set({ parentSkillId: skill.parentSkillId })
+          .where('parent_skill_id = :id', { id })
+          .execute();
+      }
 
-    await this.skillRepository.remove(skill);
+      await manager.remove(skill);
+    });
 
     // 清理 audit_reports 孤儿行（skill_id 无外键约束，需显式删除）
     try {
@@ -1180,30 +1189,34 @@ export class SkillsService implements OnModuleInit {
       throw new BadRequestException('目标版本与当前版本相同，无需回滚');
     }
 
-    // 1. 当前 → archived，指向 target
-    current.status = 'archived';
-    current.archivedAt = new Date().toISOString();
-    current.supersededById = target.id;
-    // 2. target → approved，清空它的反向指针
-    target.status = 'approved';
-    target.archivedAt = null;
-    target.supersededById = null;
-    target.reviewedBy = '系统管理员';
-    target.reviewedAt = new Date().toISOString();
-    target.adminFeedback = `由 v${current.version} 回滚至 v${target.version}`;
+    // 1+2 同一事务：当前版本归档与目标版本恢复必须同时成功，
+    // 否则任一 save 失败会出现「当前已归档、目标未恢复」的断链状态。
+    await this.dataSource.transaction(async (manager) => {
+      // 1. 当前 → archived，指向 target
+      current.status = 'archived';
+      current.archivedAt = new Date().toISOString();
+      current.supersededById = target.id;
+      // 2. target → approved，清空它的反向指针
+      target.status = 'approved';
+      target.archivedAt = null;
+      target.supersededById = null;
+      target.reviewedBy = '系统管理员';
+      target.reviewedAt = new Date().toISOString();
+      target.adminFeedback = `由 v${current.version} 回滚至 v${target.version}`;
 
-    await this.skillRepository.save(current);
-    const savedTarget = await this.skillRepository.save(target);
+      await manager.save(current);
+      await manager.save(target);
+    });
 
-    // 3. 重新同步 Git 市场至 target 的版本
+    // 3. 重新同步 Git 市场至 target 的版本（外部副作用，事务成功后再执行）
     // 沿用 approveSkill 的写法：拿 target 的原始 ZIP 推到 git 仓
     await this.gitMarketService.syncApprovedSkillToGit(
-      savedTarget,
-      this.zipBufferOf(savedTarget),
-      savedTarget.version,
+      target,
+      this.zipBufferOf(target),
+      target.version,
     );
 
-    return { current: this.stripZipBlob(current), target: this.stripZipBlob(savedTarget) };
+    return { current: this.stripZipBlob(current), target: this.stripZipBlob(target) };
   }
 
   /**

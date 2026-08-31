@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "dev-expert",
+  "version": "v1.0.1",
+  "description": "编程专家 - dev-expert",
+  "author": {
+    "name": "黄坤",
+    "email": "admin@skillhub.corp"
+  },
+  "skills": [
+    "./"
+  ]
+}

@@ -227,7 +227,7 @@ EOF
 
 两点注意：
 
-1. `synchronize: true` 目前对两种数据库都开着 —— 改实体定义会让 TypeORM 自动改表结构，**生产环境的表结构变更请先备份**。
+1. `synchronize` 已按环境门控（`synchronize: !isProduction()`）：开发/测试按实体自动建表改表；**生产环境关闭自动改表**，首次部署需先用 `APP_ENV=dev` 启动一次完成建表，之后常驻 prod，改实体不再自动 ALTER（避免生产 DROP 列丢数据）。
 2. `server/storage/` 全是运行时数据（Git 市场仓库），已被 gitignore，由启动流程自动重建，不要提交或手工编辑。删掉 `server/storage/git-marketplace` 是安全的，下次启动会自愈。
 
 ---

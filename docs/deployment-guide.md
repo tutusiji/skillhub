@@ -77,8 +77,11 @@ pnpm run server:build   # 后端 → server/dist/
 | `CORS_ORIGINS` | 空 | 跨域来源白名单（逗号分隔）。留空时生产仅同源、开发回显来源 |
 | `SEED_DEMO_DATA` | 按环境 | 是否播种演示数据。留空时生产关闭、其他环境开启 |
 
-首次启动自动完成：建表（`synchronize: true`）、播种预置账号/规则/演示数据、
-初始化 Git 市场仓库。无需手工初始化。
+首次启动自动完成：建表、播种预置账号/规则/演示数据、初始化 Git 市场仓库。无需手工初始化。
+
+> ⚠️ 建表由 `synchronize` 完成，但**生产环境已关闭自动改表**（`synchronize: !isProduction()`）：
+> 首次生产部署表结构时，先用 `APP_ENV=dev` 启动一次自动建表，之后切回 prod 常驻。
+> 此后实体改动不再自动 ALTER，杜绝生产重启 DROP 列丢数据的风险。
 
 ### 4.1 生产上线前的安全检查清单
 
@@ -90,7 +93,7 @@ pnpm run server:build   # 后端 → server/dist/
 | `SEED_DEMO_DATA` | 保持关闭（生产默认） | 演示员工账号共用弱口令 `Password123!`，等于一组可直接登录的后门账号 |
 | 超管初始密码 | 首次登录后立即修改 `admin` 的初始密码 `skill@2026` | 该初始密码在文档与源码中公开 |
 | `CORS_ORIGINS` | 同源部署时留空；确需独立前端域名时逐个列出 | 早期 `origin:'*' + credentials:true` 允许任意外部站点带受害者令牌调内网 API |
-| `synchronize` | 表结构变更前先备份，或改用显式迁移 | 自动改表在生产可能造成数据丢失 |
+| `synchronize` | 生产已默认关闭（`!isProduction()`）；首次建表先用 `APP_ENV=dev` 启动一次，之后常驻 prod | 早期自动改表在生产可能 DROP 列丢数据 |
 | 反向代理 | 若经 Nginx，需透传 `X-Forwarded-For` | 登录爆破节流与互动计数去重都依赖来源 IP，缺失时按「无来源」宽松处理 |
 | LLM 凭据 | 只写在 `.env.prod`，不入库 | `/audit/llm-config` 已做管理员鉴权且只回传掩码，但环境文件仍须妥善保管 |
 
@@ -100,7 +103,7 @@ pnpm run server:build   # 后端 → server/dist/
 
 ### 5.1 说明
 
-数据库统一使用 **PostgreSQL**。启动时按实体自动建表（`synchronize: true`），无需手工建表；只须先创建数据库与用户。
+数据库统一使用 **PostgreSQL**。启动时按实体自动建表（`synchronize: !isProduction()`，生产关闭）；只须先创建数据库与用户。生产首次建表：先用 `APP_ENV=dev` 启动一次，之后切回 prod。
 
 ### 5.2 初始化 PostgreSQL
 
@@ -122,8 +125,9 @@ DB_PASSWORD=your-strong-password
 DB_NAME=skillhub
 ```
 
-> ⚠️ `synchronize: true` 会按实体自动建表/改表。生产环境的表结构变更请先备份；
-> 追求更严格的生产管理可关闭 `synchronize` 改用显式迁移（见 `docs/database-schema.md`）。
+> ⚠️ `synchronize` 已按环境门控：非生产按实体自动建表/改表；**生产默认关闭**，
+> 首次建表先用 `APP_ENV=dev` 启动一次。生产实体变更后不再自动 ALTER——
+> 需要改表时按 `docs/database-schema.md` 手动迁移，或临时用 dev 模式同步一次。
 
 ### 5.3 多环境数据库配置（内网 dev / test / prod）
 

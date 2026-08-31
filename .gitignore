@@ -5,6 +5,11 @@ coverage/
 .DS_Store
 *.log
 
+# Playwright E2E 产物（报告 / 失败追踪 / 临时浏览器配置）
+playwright-report/
+test-results/
+blob-report/
+
 # 环境变量：默认忽略，但仓库自带的最小配置（无真实密钥）需要入库
 .env*
 !.env.example
@@ -21,3 +26,6 @@ server/storage/git-marketplace/.git/
 
 # Claude Code 本地配置与临时 worktree（不入库）
 .claude/
+
+# CodeWhale agent runtime data（子代理锁等临时状态，不入库）
+.codewhale/

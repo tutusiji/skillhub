@@ -44,7 +44,7 @@ There is **no test runner and no test suites** in either app.
 - `<Header backendOnline={...}>` renders a status dot: grey/pulsing while probing, green when the backend answered, amber for offline demo-data mode.
 
 ### Backend: NestJS enterprise service
-- **Persistence** is TypeORM via `server/src/database/database.module.ts`, **PostgreSQL only** (SQLite support was removed). Connection via `DB_*` env vars or `DATABASE_URL`; `synchronize: true` auto-creates tables. **Env files load by `APP_ENV`** (`dev`/`test`/`prod`): `ConfigModule` loads `.env` → `.env.local` → `.env.<APP_ENV>` (later wins). Commit only `server/.env`; per-environment PG addresses live in untracked `.env.test` / `.env.prod` (see deployment-guide §5.3). Entities: `UserEntity`, `SkillEntity`, `AuditRuleEntity`, `AuditReportEntity`, `SkillDemandEntity`, `LlmConfigEntity`, `FeedbackEntity`, `SkillCategoryEntity`, `ExpertDomainEntity`.
+- **Persistence** is TypeORM via `server/src/database/database.module.ts`, **PostgreSQL only** (SQLite support was removed). Connection via `DB_*` env vars or `DATABASE_URL`; `synchronize: !isProduction()` auto-creates/alters tables in non-prod only — **production never auto-ALTERs schema** (a prod boot with changed entity columns used to be able to DROP a column). First prod boot creates tables by starting once with `APP_ENV=dev`, then stays in prod. **Env files load by `APP_ENV`** (`dev`/`test`/`prod`): `ConfigModule` loads `.env` → `.env.local` → `.env.<APP_ENV>` (later wins). Commit only `server/.env`; per-environment PG addresses live in untracked `.env.test` / `.env.prod` (see deployment-guide §5.3). Entities: `UserEntity`, `SkillEntity`, `AuditRuleEntity`, `AuditReportEntity`, `SkillDemandEntity`, `LlmConfigEntity`, `FeedbackEntity`, `SkillCategoryEntity`, `ExpertDomainEntity`.
 - **Never query a `uuid` primary key with an unvalidated external string.** `UserEntity`, `SkillDemandEntity` and `AuditReportEntity` use `@PrimaryGeneratedColumn('uuid')`; `SkillEntity`, `AuditRuleEntity` and `LlmConfigEntity` use plain varchar `@PrimaryColumn`. **a malformed id makes the PostgreSQL driver throw `QueryFailedError: invalid input syntax for type uuid`, which surfaces as a 500 where the caller expects 404**. Route all such lookups through `isUuid` / `findByUuid` in `server/src/common/db-id.util.ts` (`findByUuid` returns `null` for a malformed id so existing "not found" branches keep working). This bit seven endpoints after the Postgres switch: all five `demands/:id/*` routes, both `auth/users/:id/*` routes, and `GET /auth/me` with a legacy demo token. Regression group 9 guards it.
 - `resolveFreshSession` resolves `/auth/me` by uuid lookup on `sub` only. Accounts deleted from the DB get `null` (no token-snapshot fallback — a stale token must not keep granting access). The legacy demo tokens `token-dev-admin` / `token-dev-user` were **removed as a security backdoor** (anyone could mint an admin session with them); regression group 9 asserts they now 401. JWT payload has no `points` and a stale `role`, so `/auth/me` re-reads the DB; `src/` has no reference to the legacy tokens.
 - `server/src/main.ts` enables CORS, 50mb JSON body parsing, and `raw` body parsing for Git Smart HTTP content types. Listens on `PORT || 3001`.
@@ -112,14 +112,18 @@ The same concept is implemented separately in both apps, and the two do not shar
 
 ## Testing
 
-There is no unit-test framework. Regression is covered by two executable suites (both require the backend running on the target origin):
+Frontend has a **Vitest + React Testing Library** unit suite and a **Playwright** E2E smoke suite; backend regression is covered by two Node/bash executable suites (regression + plugin-e2e both require the backend running on the target origin):
 
 ```bash
 pnpm run lint             # tsc --noEmit (frontend); server has its own tsconfig
+pnpm run test:unit        # vitest run — frontend unit tests (stores/router/mappers/utils/components ≈194, jsdom)
 pnpm run test:regression  # node scripts/regression-test.mjs [baseUrl]  — API assertions (≈360, varies with marketplace plugin count)
 pnpm run test:plugin-e2e  # bash scripts/claude-plugin-e2e.sh [gitUrl] — ≈171 assertions via the real claude CLI
-pnpm run test:all         # lint + both suites
+pnpm run test:e2e         # playwright test — browser smoke (needs backend :3001 + vite :7001; playwright.config.ts starts/reuses both)
+pnpm run test:all         # lint + unit + regression + plugin-e2e + e2e
 ```
+
+Unit-test layout: `vitest.config.ts` is standalone (jsdom, `globals:false`, explicit `import { describe, it, expect, vi } from 'vitest'` — root tsconfig has no `include` and no `types`, so globals would pull server type errors). Mocks: `src/test/helpers/mockApi.ts` (`createApiMock` wraps the real `api` via `importOriginal`), factories in `src/test/factories.ts`; store state preset via `useXStore.setState(...)`; `Modal` tests use real timers + `waitFor` for the 200ms transitions; views mock `Select` as a native `<select>` (destructure `size`/`variant` out of props to avoid React unknown-prop warnings). `SkillDetailPage` version tests must feed `makeApiSkill` (not `makeSkill`) because the real `mapApiSkill` throws on `SkillItem`-shaped objects. `MarketplaceView` dedupes approved skills **by slug**, so multi-skill fixtures need distinct `slug`s.
 
 - `scripts/regression-test.mjs` covers auth, skill lifecycle, bounty/points transactions, audit rules + sandbox scan (including a curated set of dangerous payloads), marketplace manifest contract, SPA/API coexistence, the LLM engine's six failure branches (spinning up a throwaway mock gateway on `127.0.0.1:17899`), uuid primary-key robustness, **skill visibility scoping, author-spoofing prevention, audit-score/metrics authorisation, roster access control, download-counter de-duplication, and login brute-force throttling** (group 16 runs last because it deliberately locks an account), and cleans up everything it creates. It restores the LLM config it found before running. ≈360 assertions as of the rule-library expansion (2026-08).
 - `scripts/claude-plugin-e2e.sh` shells out to the real `claude plugin` commands (`marketplace add` → `install` → `list` → cache-layout checks → `uninstall` → `marketplace remove`) and backs up `~/.claude/plugins/known_marketplaces.json` first. It exits 0 with a skip message if `claude` isn't installed.
@@ -156,13 +160,22 @@ Refreshing on `/skill/:slug` may find the skill only on the server. `selectedSki
 
 Do not "optimise" this by re-adding `fileTree` to the list columns — it is the single biggest payload regression this project has had.
 
+### Components 按功能分域（`src/components/<cat>/`）
+`src/components/` 平铺组件已按功能拆为四个子目录，新组件按职责归位、测试统一放 `src/components/__tests__/`：
+- `layout/` — 全局外壳（Header / Footer / BackToTop / AppModals / ToastContainer）
+- `views/` — 路由内容区的整页视图（MarketplaceView / SkillDetailPage / PersonalCenterView / AuditManagementView / RuleManagementView / AdminSettingsView / FeedbackAdminView / SkillDemandMarketView / CategoryAndDomainView）
+- `modals/` — 业务弹层（LoginModal / UploadSkillModal / EditSkillMetaModal / CreateSkillDemandModal / SkillDemandDetailModal / FeedbackModal / CommandPaletteModal / SkillPreviewModal / SkillVersionManagerModal / AuditReportInspector）
+- `ui/` — 无业务语义的通用原子（Modal 基座 / Select / Avatar / CenteredNotice / PermissionDenied / PopconfirmBubble / FileTreeViewer / SkillCard）
+
+Header / Footer / AppModals 自读 store（路由/登录态/权限/计数），App 层只传回调 props。
+
 ### Modals: shared component, ESC and fixed height
-Use `src/components/Modal.tsx` for new dialogs; it owns enter/leave transitions (200 ms, unmount is deferred so the leave animation plays), body scroll locking, backdrop click and `closeOnEscape` (default `true`). For panels that are **not** built on `Modal` (the audit inspector layer, the expert-group form layer) wire up `src/hooks/useEscapeKey.ts` — pass a memoised `onClose` (the hook re-binds when the callback identity changes). `PopconfirmBubble` and `CommandPaletteModal` have their own ESC handling and need neither.
+Use `src/components/ui/Modal.tsx` for new dialogs; it owns enter/leave transitions (200 ms, unmount is deferred so the leave animation plays), body scroll locking, backdrop click and `closeOnEscape` (default `true`). For panels that are **not** built on `Modal` (the audit inspector layer, the expert-group form layer) wire up `src/hooks/useEscapeKey.ts` — pass a memoised `onClose` (the hook re-binds when the callback identity changes). `PopconfirmBubble` and `CommandPaletteModal` have their own ESC handling and need neither.
 
 Route every close path through one function. The audit inspector's `closeInspector` resets `inspectingSkill`, `detailLoadingId`, the reject input and the active tab, and the header ✕ calls the same function — two divergent close paths were how stale loading state leaked into the next open. The inspector shell is `h-[min(820px,92vh)]` (not `max-h-`) with `min-h-0` on the scroll container, so switching tabs does not make the dialog jump.
 
 ### Select: 组件库化下拉（Radix，全站唯一入口）
-全站下拉统一走 `src/components/Select.tsx`（基于 `@radix-ui/react-select`）。**新代码一律用它，不要再用原生 `<select>`**——原生弹出的选项列表由浏览器绘制、直角无样式，与圆角触发器的观感割裂。
+全站下拉统一走 `src/components/ui/Select.tsx`（基于 `@radix-ui/react-select`）。**新代码一律用它，不要再用原生 `<select>`**——原生弹出的选项列表由浏览器绘制、直角无样式，与圆角触发器的观感割裂。
 - **调用点 API 不变**：子元素仍写原生 `<option>` / `<optgroup>`，组件解析为 Radix `Select.Item` / `Group`；值变更合成 `{ target: { value } }` 事件，调用点继续读 `e.target.value`。`value=""` 的 option 不渲染为 Item，其文案自动作为占位符（如「-- 选择现有技能或稍后上传 --」）。
 - `size="md"`（表单字段，占满容器宽度）/ `size="sm"`（筛选/排序工具栏）；`variant="ghost"` 用于已带边框胶囊内的触发器（如详情页版本选择器）。
 - **面板经 Portal 渲染到 body 并 popper 定位**（`z-[60]` 高于弹层），不会被 `Modal.tsx` 的 `overflow` 裁剪；圆角/悬停高亮/选中勾/键盘导航/禁用态统一。
@@ -192,7 +205,7 @@ The chosen seed is persisted to **`users.avatar_seed`, not just the URL**. Boot-
 
 Pass 2 **must** exclude rows that pass 1 already handled (`AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id::text = t.<fk> AND u.avatar_url IS NOT NULL)`) and must compare against the current value before writing. Without both guards the two passes fight each other — pass 1 writes `seed=<employeeId>`, pass 2 overwrites it with `seed=<name>`, and every restart updates the same rows forever. The SQL predicate for "auto generated" must stay equivalent to `isAutoGeneratedAvatar`; the regex `~ '/[a-zA-Z0-9-]+/svg\?seed='` matches any DiceBear host but not `https://cdn.corp.com/uploads/me.png`.
 
-**All avatars render through `src/components/Avatar.tsx`; never use a bare `<img>`.** DiceBear SVGs ship with a lot of built-in padding (measured across 10 seeds: at least 6.8% empty at the top, up to 19.8% at the bottom, 0–12% at the sides), so dropping one into a small square makes the face look tiny. The fix is CSS-only: the inner `<img>` gets `.avatar-fill` (`index.css`), which applies `transform: scale(1.26)` with `transform-origin: 50% 26%`, and the wrapper's `overflow-hidden` does the clipping. Three things are load-bearing here:
+**All avatars render through `src/components/ui/Avatar.tsx`; never use a bare `<img>`.** DiceBear SVGs ship with a lot of built-in padding (measured across 10 seeds: at least 6.8% empty at the top, up to 19.8% at the bottom, 0–12% at the sides), so dropping one into a small square makes the face look tiny. The fix is CSS-only: the inner `<img>` gets `.avatar-fill` (`index.css`), which applies `transform: scale(1.26)` with `transform-origin: 50% 26%`, and the wrapper's `overflow-hidden` does the clipping. Three things are load-bearing here:
 
 - **Do not put `scale` in the avatar URL.** DiceBear `9.x` expects an integer percentage (`scale=125`; `1.25` → 400 *must be integer*) while `10.x` expects a multiplier (`scale=1.25`; `125` → 400 *must be <= 10*). The two majors are semantically inverted, so a value that works against the public `10.x` API breaks every avatar the moment the host is switched to the intranet `9.x` service.
 - **`transform-origin` Y is 26%, not 50% or 100%.** Top padding is the smallest (6.8%), so scaling from the centre or the bottom eats the top of the head first (measured 9.6–16.3% of head pixels lost). Anchoring high keeps the top crop at ~5.4%, i.e. still inside the padding — zero head loss; the resulting 15.3% bottom / 10.3% side crop only removes whitespace and the hem of the clothing.
