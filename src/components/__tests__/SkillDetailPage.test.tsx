@@ -62,7 +62,9 @@ beforeEach(() => {
 describe('SkillDetailPage 基础渲染', () => {
   it('渲染技能名与返回按钮，点击返回触发 onBack', () => {
     const callbacks = renderDetail();
-    expect(screen.getByText('演示技能')).toBeInTheDocument();
+    // 页头技能名 + README tab 默认渲染的 `## 演示技能` 标题（markdown 渲染后
+    // 成为真正的 <h2>）都会命中，用 getAllByText 断言「至少出现技能名」。
+    expect(screen.getAllByText('演示技能').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: '返回技能集市' }));
     expect(callbacks.onBack).toHaveBeenCalledTimes(1);
   });
@@ -72,6 +74,97 @@ describe('SkillDetailPage 基础渲染', () => {
     fireEvent.click(screen.getByRole('button', { name: '多端安装指令' }));
     // 安装页出现客户端切换标签
     expect(screen.getByText(/选择客户端进行一键安装/)).toBeInTheDocument();
+  });
+});
+
+describe('SkillDetailPage 使用说明 (README)', () => {
+  it('fileTree 含 README.md 时直接展示其原文，而非 readme 摘要', () => {
+    renderDetail({
+      skill: makeSkill({
+        readme: '旧摘要：仅一行简介',
+        fileTree: [
+          {
+            id: 'readme',
+            name: 'README.md',
+            path: 'README.md',
+            type: 'file',
+            content: '# 真实使用文档\n\n## 安装步骤\n1. 执行安装命令',
+          },
+        ],
+      }),
+    });
+    // README tab 是默认页：展示技能包内 README.md 的真实内容
+    expect(screen.getByText(/真实使用文档/)).toBeInTheDocument();
+    expect(screen.getByText(/安装步骤/)).toBeInTheDocument();
+    // 不展示上传时生成的 readme 摘要
+    expect(screen.queryByText(/旧摘要/)).not.toBeInTheDocument();
+  });
+
+  it('README 在子目录（docs/README.md）同样命中', () => {
+    renderDetail({
+      skill: makeSkill({
+        readme: '摘要',
+        fileTree: [
+          {
+            id: 'd1',
+            name: 'docs',
+            path: 'docs',
+            type: 'directory',
+            children: [
+              {
+                id: 'r1',
+                name: 'README.md',
+                path: 'docs/README.md',
+                type: 'file',
+                content: '子目录里的文档正文',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    expect(screen.getByText(/子目录里的文档正文/)).toBeInTheDocument();
+  });
+
+  it('fileTree 无说明文档时回退到 readme 摘要', () => {
+    renderDetail({
+      skill: makeSkill({
+        readme: '回退摘要内容',
+        fileTree: [
+          {
+            id: 's1',
+            name: 'main.ts',
+            path: 'src/main.ts',
+            type: 'file',
+            content: 'console.log(1)',
+          },
+        ],
+      }),
+    });
+    expect(screen.getByText('回退摘要内容')).toBeInTheDocument();
+  });
+
+  it('纯技能（仅 SKILL.md）展示正文，剥离顶部 YAML frontmatter', () => {
+    renderDetail({
+      skill: makeSkill({
+        readme: '旧摘要',
+        fileTree: [
+          {
+            id: 's1',
+            name: 'SKILL.md',
+            path: 'SKILL.md',
+            type: 'file',
+            content:
+              '---\nname: my-skill\ndescription: 元数据\nalowed-tools:\n  - Read\n---\n\n# 技能使用说明\n\n调用方式……',
+          },
+        ],
+      }),
+    });
+    // 展示 SKILL.md 正文而非 frontmatter 元数据
+    expect(screen.getByText(/技能使用说明/)).toBeInTheDocument();
+    expect(screen.getByText(/调用方式/)).toBeInTheDocument();
+    expect(screen.queryByText(/元数据/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/alowed-tools/)).not.toBeInTheDocument();
   });
 });
 

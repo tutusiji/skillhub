@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   ArrowLeft,
   Download, 
@@ -32,8 +32,10 @@ import { api, mapApiSkill } from '../../services/api';
 import { FileTreeViewer } from '../ui/FileTreeViewer';
 import { AuditReportInspector } from '../modals/AuditReportInspector';
 import { getMarketplaceAddCommand, getMarketplaceUpdateCommand } from '../../utils/marketplace';
+import { findReadmeFile, stripFrontmatter } from '../../utils/readme';
 import { Avatar } from '../ui/Avatar';
 import { Select } from '../ui/Select';
+import { Markdown } from '../ui/Markdown';
 
 interface SkillDetailPageProps {
   skill: SkillItem;
@@ -92,6 +94,16 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
     (currentUser.role === 'admin' ||
       currentUser.role === 'super_admin' ||
       currentUser.id === skill.submitterId);
+
+  // 使用说明内容：优先直接展示技能包内 README.md / SKILL.md 的原文（详情接口
+  // 已回填 fileTree，App 层进入详情前 await 拉全量）。SKILL.md 顶部的 YAML
+  // frontmatter 是给 Claude Code 读的元数据，展示前剥离；文件树不含说明文档
+  // 时（离线降级 / 老技能）回退到上传时生成的 readme 摘要。
+  const readmeContent = useMemo(() => {
+    const node = findReadmeFile(skill.fileTree);
+    const raw = node?.content?.trim();
+    return raw ? stripFrontmatter(raw) : skill.readme;
+  }, [skill]);
 
   useEffect(() => {
     if (!isOwnerOrAdmin) {
@@ -556,10 +568,10 @@ export const SkillDetailPage: React.FC<SkillDetailPageProps> = ({
         {/* 1. README TAB */}
         {activeTab === 'readme' && (
           <div className="space-y-6">
-            <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/90 shadow-sm leading-relaxed">
-              <div className="whitespace-pre-wrap font-sans text-slate-800 text-sm leading-relaxed">
-                {skill.readme}
-              </div>
+            <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/90 shadow-sm">
+              {/* 说明文档以 Markdown 渲染：标题/代码块/表格等按文档样式展示；
+                  内容不可信，渲染组件不启用原始 HTML（见 Markdown.tsx 安全契约） */}
+              <Markdown content={readmeContent} />
             </div>
           </div>
         )}

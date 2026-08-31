@@ -165,7 +165,7 @@ Do not "optimise" this by re-adding `fileTree` to the list columns — it is the
 - `layout/` — 全局外壳（Header / Footer / BackToTop / AppModals / ToastContainer）
 - `views/` — 路由内容区的整页视图（MarketplaceView / SkillDetailPage / PersonalCenterView / AuditManagementView / RuleManagementView / AdminSettingsView / FeedbackAdminView / SkillDemandMarketView / CategoryAndDomainView）
 - `modals/` — 业务弹层（LoginModal / UploadSkillModal / EditSkillMetaModal / CreateSkillDemandModal / SkillDemandDetailModal / FeedbackModal / CommandPaletteModal / SkillPreviewModal / SkillVersionManagerModal / AuditReportInspector）
-- `ui/` — 无业务语义的通用原子（Modal 基座 / Select / Avatar / CenteredNotice / PermissionDenied / PopconfirmBubble / FileTreeViewer / SkillCard）
+- `ui/` — 无业务语义的通用原子（Modal 基座 / Select / Avatar / CenteredNotice / PermissionDenied / PopconfirmBubble / FileTreeViewer / SkillCard / Markdown（react-markdown + remark-gfm 安全渲染，转义原始 HTML 防 XSS，供 README tab 展示上传包内说明文档））
 
 Header / Footer / AppModals 自读 store（路由/登录态/权限/计数），App 层只传回调 props。
 

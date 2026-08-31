@@ -20,6 +20,7 @@ import {
   UserAccount,
 } from '../../types';
 import { api } from '../../services/api';
+import { findReadmeFile } from '../../utils/readme';
 import { Modal } from '../ui/Modal';
 import { Select } from '../ui/Select';
 
@@ -175,27 +176,6 @@ async function parseZipToTree(zipFile: File): Promise<FileTreeNode[]> {
     }
   }
   return tree;
-}
-
-/**
- * 从 ZIP 解析出的文件树中定位说明文档（README.md / SKILL.md）
- * @param tree 文件树
- */
-function findReadmeFile(tree: FileTreeNode[]): FileTreeNode | null {
-  const targets = ['README.md', 'readme.md', 'Readme.md', 'SKILL.md', 'skill.md', 'README', 'readme'];
-  const flat: FileTreeNode[] = [];
-  const walk = (nodes: FileTreeNode[]) => {
-    for (const n of nodes) {
-      if (n.type === 'directory') walk(n.children || []);
-      else flat.push(n);
-    }
-  };
-  walk(tree);
-  for (const t of targets) {
-    const found = flat.find(n => n.name === t || n.path === t || n.path?.endsWith(`/${t}`));
-    if (found) return found;
-  }
-  return null;
 }
 
 /**
